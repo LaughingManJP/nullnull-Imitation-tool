@@ -1,0 +1,155 @@
+unofficial-null2-m5stack — Personal Use Only License
+個人利用限定ライセンス
+
+Copyright (c) 2026 LaughingManJP
+
+このライセンスの趣旨:
+  紹介や fork は歓迎です。コードそのものを配ること(GitHub の外へ)と、
+  商用の利用にだけ、事前にひとこと確認をお願いしています。
+
+--------------------------------------------------------------------
+日本語 (この日本語版と英語版のあいだに食い違いがあった場合は、日本語版を優先します)
+--------------------------------------------------------------------
+
+このソフトウェア(以下「本ソフトウェア」といいます)は、
+あなた個人が私的に楽しむ範囲に限り、無償で利用することができます。
+
+■ 許可されていること
+
+  ・個人が楽しむために使うこと
+  ・学習や研究のために、ソースコードを読むこと
+  ・自分の手元で改造すること
+
+  ・ブログ、SNS、動画、記事などで紹介すること
+    スクリーンショットや、動かしている写真・動画の掲載も歓迎します。
+    その際は、出典としてこのリポジトリへのリンクを添えていただけると嬉しいです。
+
+  ・GitHub 上でこのリポジトリを fork すること、および GitHub の機能の範囲で
+    行われる閲覧・複製・表示
+    fork したものを公開したままにしておくことも含みます。
+    その場合は、このライセンスファイルをそのまま残してください。
+
+■ 事前に書面での許可が必要なこと
+
+  下記はいずれも禁止ではなく、「ひとこと聞いてください」という意味です。
+  ご連絡いただければ、個別に許可することがあります。
+
+  ・GitHub の外へコードを配布すること
+    (自分のサイトやストアでの配布、zip での再配布、他のホスティングサービスへの
+     転載、配布物への同梱など。そのままか改変したかを問わず、
+     ソースコード・バイナリのいずれも)
+  ・展示、上映、実演(無料か有料かを問わず)
+  ・学校の課題としての提出、発表、コンテストへの応募
+  ・販売、有償での頒布
+  ・本ソフトウェアを書き込んだ機器の販売、頒布
+  ・有償の製品、サービス、イベント、講座、受託制作に組み込んで利用すること
+  ・広告収入や課金を主な目的とする用途に利用すること
+
+■ ご連絡先
+
+      https://github.com/LaughingManJP/
+
+■ 着想について
+
+  本ソフトウェアは、2025年 大阪・関西万博のパビリオン「null²」
+  (落合陽一氏)を見た印象をもとに、独自に書き起こした非公式の個人制作物です。
+
+  null²、落合陽一氏、および万博の関係者・権利者とは一切関係がなく、
+  許諾も受けていません。実物の映像・音声・設計データ・プログラムは
+  一切使用しておらず、画面に出るものはすべて、本ソフトウェアが
+  その場で計算して描いたものです。
+
+  リポジトリ名に含まれる "null2" は、着想元を示すための表記であり、
+  公式の配布物・移植版であることを意味するものではありません。
+
+  本ソフトウェアの著作権は、冒頭に記載の著作権者に帰属します。
+
+■ 保証と責任
+
+  本ソフトウェアは「現状のまま」提供されます。明示・黙示を問わず、
+  商品性、特定目的への適合性、権利非侵害を含むいかなる保証もありません。
+  作者は、本ソフトウェアの使用または使用不能から生じたいかなる損害についても、
+  責任を負いません。ご自身の責任においてご利用ください。
+
+■ 違反した場合
+
+  このライセンスに違反して本ソフトウェアを利用した場合、その時点で
+  本ライセンスによって与えられた権利は自動的に終了します。
+
+--------------------------------------------------------------------
+English (in case of any conflict, the Japanese text above prevails)
+--------------------------------------------------------------------
+
+Spirit of this license:
+  Write-ups and forks are welcome. Only redistributing the code itself
+  (outside GitHub) and commercial use require that you ask first.
+
+This software (the "Software") may be used free of charge for your own
+personal enjoyment only.
+
+PERMITTED
+
+  * Using the Software for your own personal enjoyment
+  * Reading the source code to study or learn from it
+  * Modifying the Software for your own private use
+
+  * Writing about it on a blog, social media, video, or article.
+    Screenshots, photos and videos of it running are welcome. A link
+    back to this repository as the source is appreciated.
+
+  * Forking this repository on GitHub, and any viewing, copying or
+    display that happens through GitHub's own features — including
+    leaving your fork public. Please keep this license file intact.
+
+REQUIRES PRIOR WRITTEN PERMISSION
+
+  The following are not forbidden outright — they simply require that you
+  ask first. Get in touch and permission may be granted case by case.
+
+  * Distributing the code outside GitHub: hosting it on your own site or
+    a store, redistributing it as a zip, reposting it on another hosting
+    service, bundling it with anything you hand out — whether unmodified
+    or modified, as source code or as a binary
+  * Exhibiting, screening, or performing it publicly, whether free or paid
+  * Submitting it as schoolwork, presenting it, or entering it into
+    a competition
+  * Selling it, or distributing it for a fee
+  * Selling or distributing hardware with the Software installed on it
+  * Incorporating it into any paid product, service, event, course, or
+    commissioned work
+  * Any use whose primary purpose is advertising revenue or paid access
+
+CONTACT
+
+      https://github.com/LaughingManJP/
+
+ABOUT THE INSPIRATION
+
+  This is an unofficial, independently written personal project, inspired
+  by the impression left by the null² pavilion (Yoichi Ochiai) at Expo
+  2025 Osaka, Kansai.
+
+  It is not affiliated with, endorsed by, or authorized by null², Yoichi
+  Ochiai, or anyone involved in the Expo. No footage, audio, design data
+  or program code from the actual pavilion is used; everything on screen
+  is computed and drawn by this software at run time.
+
+  The string "null2" in the repository name identifies the inspiration
+  only. It does not indicate an official release or port.
+
+  Copyright in this Software belongs to the copyright holder named above.
+
+NO WARRANTY
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN
+  CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE. Use at your own risk.
+
+TERMINATION
+
+  Any use of the Software in violation of this license automatically
+  terminates the rights granted to you under it.
