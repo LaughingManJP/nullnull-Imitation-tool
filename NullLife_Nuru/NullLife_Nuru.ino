@@ -31,8 +31,11 @@
 static constexpr float GOO_STICK   = 15.0f;   // 指に吸いつく高さ
 static constexpr float GOO_GRIP    = 3.0f;    // 吸いつく速さ
 static constexpr float GOO_SUCK    = 0.35f;   // 吸いついたまわりのくぼみ
-static constexpr float GOO_DIFFUSE = 0.17f;   // 粘りの広がり(0.24以下)
-static constexpr float GOO_RELAX   = 0.35f;   // 元に戻る速さ(小さいほどゆっくり)
+static constexpr float GOO_DIFFUSE = 0.10f;   // 粘りの広がり(0.24以下。小さいほど跡が長く残る)
+static constexpr float GOO_RELAX   = 0.12f;   // 元に戻る速さ(小さいほどゆっくり)
+static constexpr float HEART_DOME  = 6.0f;    // 鼓動で膜がふくらむ量
+static constexpr float HEART_GLOW  = 0.22f;   // 鼓動で生き物が強まる量
+static constexpr float HEART_SWELL = 0.12f;   // 鼓動で生き物がふくらむ量
 static constexpr float LUMP_FORCE  = 6.0f;    // 生き物の動く力
 static constexpr float LUMP_DRAG   = 2.4f;    // 生き物の重たさ(大きいほど粘る)
 static constexpr float SLIP        = 26.0f;   // 押したときにすり抜ける強さ
@@ -331,7 +334,7 @@ static void simulate(const Input& in, UV* out) {
   //      しばらく触らないと膜は平らに戻りきるので、計算を休んで軽くする
   if (in.touching || in.tapped || tState != T_NONE) gooQuiet = 0;
   else gooQuiet += dt;
-  if (gooQuiet > 30.0f) {
+  if (gooQuiet > 50.0f) {
     if (!gooCleared) { memset(gooA, 0, GN * sizeof(float)); gooCleared = true; }
   } else {
     gooCleared = false;
@@ -466,7 +469,7 @@ static void simulate(const Input& in, UV* out) {
   }
 
   // ---- 高さ = ふくらんだ膜 + ねっとり変形 + ぬめり
-  float domeDepth = ((ROUND ? 9.0f : 14.0f) + 2.0f * breath + 1.5f * hb) * SC;
+  float domeDepth = ((ROUND ? 9.0f : 14.0f) + 2.0f * breath + HEART_DOME * hb) * SC;
   float wetK = 0.15f / SC;
   for (int y = 0; y < GY; ++y) {
     const float* c0 = sheenC + (y >> 2) * CGX;
@@ -484,12 +487,12 @@ static void simulate(const Input& in, UV* out) {
   }
 
   // ---- 生き物
-  float gain = wake * (1.0f + 0.10f * breath + 0.05f * hb) * (1.0f - 0.35f * fear);
+  float gain = wake * (1.0f + 0.10f * breath + HEART_GLOW * hb) * (1.0f - 0.35f * fear);
   for (int n = 0; n < NLUMP; ++n) {
     Lump& L = lumps[n];
     float wob = L.jig * JIGGLE * sinf(L.jigPh);      // ぷるぷる
     float amp = L.baseAmp * gain * (0.85f + 0.15f * sinf(simT * 0.7f + L.phase)) * (1.0f + wob);
-    float sig = L.sig * (1.0f + 0.07f * breath);
+    float sig = L.sig * (1.0f + 0.07f * breath + HEART_SWELL * hb);
     float v = sqrtf(L.vx * L.vx + L.vy * L.vy);
     float stretch = fminf(1.3f, v * 0.06f / SC);     // 速く動くほど、ねばっと伸びる
     float dirX = v > 0.01f ? L.vx / v : 1.0f, dirY = v > 0.01f ? L.vy / v : 0.0f;
