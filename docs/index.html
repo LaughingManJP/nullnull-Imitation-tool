@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M5Stack スケッチ集</title>
+<meta name="description" content="M5Stack StopWatch / CoreS3 用のスケッチを、書き換えずにブラウザで動かせるようにしたページ集です。">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f4f4f6;
+  --surface: #ffffff;
+  --border: rgba(20, 20, 28, 0.10);
+  --ink: #16161c;
+  --muted: #5f5f6d;
+  --faint: #8a8a99;
+  --accent: #6a5acd;
+  --shadow: 0 1px 2px rgba(20,20,28,.05), 0 8px 24px rgba(20,20,28,.06);
+}
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    --bg: #0d0d11;
+    --surface: #17171d;
+    --border: rgba(255, 255, 255, 0.10);
+    --ink: #ececf2;
+    --muted: #a3a3b2;
+    --faint: #70707f;
+    --accent: #a396f5;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d0d11;
+  --surface: #17171d;
+  --border: rgba(255, 255, 255, 0.10);
+  --ink: #ececf2;
+  --muted: #a3a3b2;
+  --faint: #70707f;
+  --accent: #a396f5;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+               "BIZ UDPGothic", Meiryo, system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.75;
+  font-size: 16px;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 56px 16px 96px; }
+header { margin-bottom: 40px; }
+.kicker {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+h1 {
+  margin: 0 0 14px;
+  font-size: clamp(28px, 5vw, 42px);
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  font-weight: 700;
+}
+.lede { margin: 0; max-width: 62ch; color: var(--muted); }
+.lede code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9em;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  padding: .1em .4em;
+  border-radius: 5px;
+}
+.grid {
+  margin-top: 40px;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: var(--shadow);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.card:hover, .card:focus-visible {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 2px 4px rgba(20,20,28,.06), 0 14px 34px rgba(20,20,28,.14);
+  outline: none;
+}
+.shot { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: #000; }
+.body { padding: 16px 18px 20px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.name { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+.blurb { margin: 0; font-size: 14px; line-height: 1.7; color: var(--muted); }
+.meta {
+  margin-top: auto;
+  padding-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.tag {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+footer {
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--muted);
+}
+footer p { margin: 0 0 10px; max-width: 62ch; }
+@media (max-width: 480px) {
+  .wrap { padding: 36px 16px 64px; }
+  .grid { gap: 16px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <p class="kicker">M5Stack StopWatch / CoreS3</p>
+      <h1>スケッチ集</h1>
+      <p class="lede">
+        M5Stack 用の <code>.ino</code> を一文字も書き換えず、WebAssembly にしてブラウザで動かしています。
+        インストールは何もいりません。開いて、クリックやドラッグで触ってください。
+        実機のボタン A / B は、画面の横のボタンか <code>A</code> / <code>B</code> キーです。
+      </p>
+    </header>
+
+    <main class="grid">
+      <a class="card" href="nulllife.html">
+        <img class="shot" src="thumbs/nulllife.jpg" width="360" height="360" decoding="async"
+             alt="NullLife の画面">
+        <div class="body">
+          <div class="name">NullLife</div>
+          <p class="blurb">液体金属のような鏡面の膜。その下で「何か」が動き、呼吸し、鼓動します。構うほど速くなり、放っておくと落ち着きます。</p>
+          <div class="meta"><span class="tag">NullLife.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="nurunuru.html">
+        <img class="shot" src="thumbs/nurunuru.jpg" width="360" height="360" decoding="async"
+             alt="NullLife ぬるぬる版 の画面">
+        <div class="body">
+          <div class="name">NullLife ぬるぬる版</div>
+          <p class="blurb">触るとぬるっと応える鏡面。指に吸いつき、なぞった跡はテカテカ残り、膜の下の生き物が腕を伸ばしてきます。離すと糸を引いて、ぷつっと切れます。</p>
+          <div class="meta"><span class="tag">NullLife_Nuru.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="nuru.html">
+        <img class="shot" src="thumbs/nuru.jpg" width="360" height="360" decoding="async"
+             alt="NullLife ぬるっと版 の画面">
+        <div class="body">
+          <div class="name">NullLife ぬるっと版</div>
+          <p class="blurb">水あめのようにねっとりした膜。引っぱると伸び、離すとゆっくりたれて戻ります。四角い画面（CoreS3）版です。</p>
+          <div class="meta"><span class="tag">NullLife_CoreS3_Nuru.ino</span><span class="tag">CoreS3</span></div>
+        </div>
+      </a>
+      <a class="card" href="pavilion.html">
+        <img class="shot" src="thumbs/pavilion.jpg" width="360" height="360" decoding="async"
+             alt="NullPavilion の画面">
+        <div class="body">
+          <div class="name">NullPavilion</div>
+          <p class="blurb">手のひらの鏡のパビリオン。立方体を積んだ建物の表面ぜんぶが鏡の膜で、空や雲、大屋根リングが映り込みます。</p>
+          <div class="meta"><span class="tag">NullPavilion.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="mirror.html">
+        <img class="shot" src="thumbs/mirror.jpg" width="360" height="360" decoding="async"
+             alt="NullMirror の画面">
+        <div class="body">
+          <div class="name">NullMirror</div>
+          <p class="blurb">砕けた鏡の部屋がヌルヌル流れつづけます。かけらごとに別の景色がすべり、くしゃくしゃの箔がキラキラ光ります。</p>
+          <div class="meta"><span class="tag">NullMirror.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="mirrorhd.html">
+        <img class="shot" src="thumbs/mirrorhd.jpg" width="360" height="360" decoding="async"
+             alt="NullMirror HD の画面">
+        <div class="body">
+          <div class="name">NullMirror HD</div>
+          <p class="blurb">同じ部屋の高精細版。1ピクセルずつ計算するので、ひびは細く鋭く、光のすじもくっきり出ます。</p>
+          <div class="meta"><span class="tag">NullMirror.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="mirrorhd2.html">
+        <img class="shot" src="thumbs/mirrorhd2.jpg" width="360" height="360" decoding="async"
+             alt="NullMirror HD 高速版 の画面">
+        <div class="body">
+          <div class="name">NullMirror HD 高速版</div>
+          <p class="blurb">見える絵は高精細版のまま、実機で速く動くように中身を書き直した版。整数だけで計算し、差分で進めます。</p>
+          <div class="meta"><span class="tag">NullMirror.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="mirrorhd3.html">
+        <img class="shot" src="thumbs/mirrorhd3.jpg" width="360" height="360" decoding="async"
+             alt="NullMirror HD 高速版2 の画面">
+        <div class="body">
+          <div class="name">NullMirror HD 高速版2</div>
+          <p class="blurb">立方体と後ろのガラスが切り離され、立方体を動かしても後ろは流れません。描画もさらに詰めてあります。</p>
+          <div class="meta"><span class="tag">NullMirror.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="mirrorhd4.html">
+        <img class="shot" src="thumbs/mirrorhd4.jpg" width="360" height="360" decoding="async"
+             alt="NullMirror HD 渦しっかり版 の画面">
+        <div class="body">
+          <div class="name">NullMirror HD 渦しっかり版</div>
+          <p class="blurb">押し続けたときの渦が作り直され、指のまわりを本当に回します。押すほど、らせん状に巻き込まれていきます。</p>
+          <div class="meta"><span class="tag">NullMirror.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="mirrorhd5.html">
+        <img class="shot" src="thumbs/mirrorhd5.jpg" width="360" height="360" decoding="async"
+             alt="NullMirror HD 割れる版 の画面">
+        <div class="body">
+          <div class="name">NullMirror HD 割れる版</div>
+          <p class="blurb">触りかたが渦から「割れ」に。タップでひびが走り、押し続けると広がり、待つとゆっくり元どおりにつながります。</p>
+          <div class="meta"><span class="tag">NullMirror.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="horn.html">
+        <img class="shot" src="thumbs/horn.jpg" width="360" height="360" decoding="async"
+             alt="NullHorn の画面">
+        <div class="body">
+          <div class="name">NullHorn</div>
+          <p class="blurb">ラッパ形のくぼみの奥で光る LED リングと、うねる鏡の膜。赤と青のリングが重なり、内側の池に白熱した筋が流れ込みます。</p>
+          <div class="meta"><span class="tag">NullHorn.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="eye.html">
+        <img class="shot" src="thumbs/eye.jpg" width="360" height="360" decoding="async"
+             alt="NullEye の画面">
+        <div class="body">
+          <div class="name">NullEye</div>
+          <p class="blurb">浮かぶ鏡の立方体と、その真ん中で光る眼。色は巡り、ときどきまばたきします。ボタンで朝・昼・夕方・夜が変わります。</p>
+          <div class="meta"><span class="tag">NullEye.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="vortex.html">
+        <img class="shot" src="thumbs/vortex.jpg" width="360" height="360" decoding="async"
+             alt="NullVortex の画面">
+        <div class="body">
+          <div class="name">NullVortex</div>
+          <p class="blurb">もやの上に浮かぶ塊を、いくつもの渦が引き伸ばしながら巻き込みます。押すといちばん近い渦がついてきて、強く吸い込みます。</p>
+          <div class="meta"><span class="tag">NullVortex.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+      <a class="card" href="sayonara.html">
+        <img class="shot" src="thumbs/sayonara.jpg" width="360" height="360" decoding="async"
+             alt="さようならホモサピエンス の画面">
+        <div class="body">
+          <div class="name">さようならホモサピエンス</div>
+          <p class="blurb">夜のヌルの森と鏡の床。真ん中のストップウォッチは、数字が変わるたびに光のかけらになってほどけ、空へ昇っていきます。</p>
+          <div class="meta"><span class="tag">SayonaraHomoSapiens.ino</span><span class="tag">StopWatch</span></div>
+        </div>
+      </a>
+    </main>
+
+    <footer>
+      <p>
+        実機では2つのコアが画面を分担して描きますが、ブラウザは1つのスレッドなので、
+        その受け渡しの部分だけを小さな変換部分で置き換え、同じ順番で描いています。
+        速度と色味は実機と少し異なります。
+      </p>
+      <p>各ページは1ファイル完結で、外部から何も読み込みません。</p>
+    </footer>
+  </div>
+</body>
+</html>
