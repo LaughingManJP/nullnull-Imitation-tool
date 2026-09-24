@@ -18,7 +18,8 @@
 
 ※実機検証がまだです。
 
-
+【ブラウザ上でエミュレートするのはこちら】
+https://laughingmanjp.github.io/nullnull-Imitation-tool/
 
 
 
