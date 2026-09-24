@@ -37,8 +37,11 @@ static constexpr int   NLUMP  = 4;            // 膜の下の「生き物」の�
 // ---- ぬるっと具合の調整用 --------------------------------------------------
 static constexpr float GOO_STICK   = 11.0f;   // 指に吸いつく高さ
 static constexpr float GOO_GRIP    = 2.2f;    // 吸いつく速さ
-static constexpr float GOO_DIFFUSE = 0.18f;   // 粘りの広がり(0.24以下)
-static constexpr float GOO_RELAX   = 0.45f;   // 元に戻る速さ(小さいほどゆっくり)
+static constexpr float GOO_DIFFUSE = 0.055f;  // 粘りの広がり(0.24以下。小さいほど跡が長く残る)
+static constexpr float GOO_RELAX   = 0.10f;   // 元に戻る速さ(小さいほどゆっくり)
+static constexpr float HEART_DOME  = 6.0f;    // 鼓動で膜がふくらむ量
+static constexpr float HEART_GLOW  = 0.22f;   // 鼓動で生き物が強まる量
+static constexpr float HEART_SWELL = 0.12f;   // 鼓動で生き物がふくらむ量
 static constexpr float LUMP_FORCE  = 6.0f;    // 生き物の動く力
 static constexpr float LUMP_DRAG   = 2.2f;    // 生き物の重たさ(大きいほど粘る)
 static constexpr float TENDRIL_IN  = 0.55f;   // 触手が伸びる速さ
@@ -330,14 +333,14 @@ static void simulate(const Input& in, UV* out) {
   }
 
   // ---- 高さ = ふくらんだ膜 + ねっとり変形 + 生き物 + 触手
-  float domeDepth = 14.0f + 2.0f * breath + 1.5f * hb;
+  float domeDepth = 14.0f + 2.0f * breath + HEART_DOME * hb;
   for (int i = 0; i < GN; ++i) hField[i] = -domeDepth * dome[i] + gooA[i];
 
-  float gain = wake * (1.0f + 0.10f * breath + 0.05f * hb) * (1.0f - 0.35f * fear);
+  float gain = wake * (1.0f + 0.10f * breath + HEART_GLOW * hb) * (1.0f - 0.35f * fear);
   for (int n = 0; n < NLUMP; ++n) {
     Lump& L = lumps[n];
     float amp = L.baseAmp * gain * (0.85f + 0.15f * sinf(simT * 0.7f + L.phase));
-    float sig = L.sig * (1.0f + 0.07f * breath);
+    float sig = L.sig * (1.0f + 0.07f * breath + HEART_SWELL * hb);
     float v = sqrtf(L.vx * L.vx + L.vy * L.vy);
     float stretch = fminf(1.3f, v * 0.06f);          // 速く動くほど、ねばっと伸びる
     float dirX = v > 0.01f ? L.vx / v : 1.0f, dirY = v > 0.01f ? L.vy / v : 0.0f;
