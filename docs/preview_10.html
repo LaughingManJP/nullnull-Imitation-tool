@@ -1,0 +1,1024 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Null 十の習作</title>
+<style>
+  :root {
+    --bg: #0b0b0d; --fg: #e9e7e2; --mute: #8d8a84; --line: #2a2a2e; --accent: #cfe6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg);
+    font-family: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 15px; font-weight: 400; letter-spacing: .18em; color: var(--mute); margin: 0 0 14px; }
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+  .group { grid-column: 1 / -1; font-size: 12px; color: var(--mute); letter-spacing: .12em; margin: 6px 0 -2px; }
+  .tabs button { flex: 1; background: transparent; color: var(--mute); border: 1px solid var(--line);
+    padding: 10px 8px; font: inherit; font-size: 14px; letter-spacing: .08em; cursor: pointer; border-radius: 2px; }
+  .tabs button[aria-pressed="true"] { color: var(--fg); border-color: #6f6c66; }
+  .stage { display: flex; justify-content: center; }
+  .watch { width: min(100%, 498px); aspect-ratio: 1; border-radius: 50%; padding: 16px;
+    background: radial-gradient(circle at 30% 25%, #3a3a3e, #121214 60%, #050506);
+    box-shadow: 0 0 0 1px #2c2c30, 0 18px 50px rgba(0,0,0,.6); }
+  canvas { width: 100%; height: 100%; display: block; border-radius: 50%; background: #000;
+    touch-action: none; cursor: crosshair; }
+  .about { margin-top: 18px; font-size: 13px; line-height: 1.9; color: var(--mute); min-height: 6em; }
+  .about b { color: var(--fg); font-weight: 400; letter-spacing: .06em; }
+  .fps { font: 11px ui-monospace, Menlo, monospace; color: #55534f; text-align: right; margin-top: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>落合陽一さんの作品と null² から受けたイメージ ── StopWatch の丸い画面(466×466)で</h1>
+  <div class="tabs">
+    <div class="group">落合陽一さんの作品から</div>
+    <button data-k="A" aria-pressed="true">浮遊する光 NullFloat</button>
+    <button data-k="B" aria-pressed="false">計算機自然の池 NullPond</button>
+    <button data-k="C" aria-pressed="false">空中の光の点描 NullPlasma</button>
+    <button data-k="D" aria-pressed="false">金継ぎの計算 NullKintsugi</button>
+    <div class="group">null² から</div>
+    <button data-k="E" aria-pressed="false">無限の鏡の部屋 NullInfinity</button>
+    <button data-k="F" aria-pressed="false">デジタルの分身 NullTwin</button>
+    <button data-k="G" aria-pressed="false">鏡の雫 NullDrop</button>
+    <button data-k="H" aria-pressed="false">揺れる鏡のタイル NullTiles</button>
+    <div class="group">さらに2つ</div>
+    <button data-k="I" aria-pressed="false">計算機の枯山水 NullZen</button>
+    <button data-k="J" aria-pressed="false">焦点の光 NullBokeh</button>
+  </div>
+  <div class="stage"><div class="watch"><canvas id="cv" width="466" height="466"></canvas></div></div>
+  <div class="fps" id="fps"></div>
+  <div class="about" id="about"></div>
+</main>
+<script>
+"use strict";
+const S = 466, R = S / 2, C = (S - 1) / 2;
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const aboutEl = document.getElementById("about"), fpsEl = document.getElementById("fps");
+
+// ---- 指(マウス / タッチ)
+const ptr = { down: false, x: C, y: C, tapped: false };
+function toLocal(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * S / r.width, (e.clientY - r.top) * S / r.height]; }
+cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); [ptr.x, ptr.y] = toLocal(e); ptr.down = true; ptr.tapped = true; });
+cv.addEventListener("pointermove", e => { if (ptr.down) [ptr.x, ptr.y] = toLocal(e); });
+const up = () => { ptr.down = false; };
+cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+
+// ---- 小さな道具
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry(20251007);
+function valueNoise(n, seed) {                       // n×n の、端がつながる値ノイズ(なめらか補間は使う側で)
+  const r = mulberry(seed), a = new Float32Array(n * n);
+  for (let i = 0; i < n * n; i++) a[i] = r();
+  return a;
+}
+function sampleNoise(a, n, x, y) {                   // x, y: 格子単位(端はつながる)
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const x0 = ((xi % n) + n) % n, y0 = ((yi % n) + n) % n, x1 = (x0 + 1) % n, y1 = (y0 + 1) % n;
+  const v00 = a[y0 * n + x0], v10 = a[y0 * n + x1], v01 = a[y1 * n + x0], v11 = a[y1 * n + x1];
+  return v00 + (v10 - v00) * sx + (v01 - v00) * sy + (v00 - v10 - v01 + v11) * sx * sy;
+}
+const inside = new Uint8Array(S * S);              // 丸い画面の中か
+for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) inside[y * S + x] = ((x - C) ** 2 + (y - C) ** 2 <= (R - 0.5) ** 2) ? 1 : 0;
+
+// =====================================================================
+// 浮遊する光 NullFloat
+//   まわりの6つの見えない音源から出た波が重なって、強いところと弱いところ(節)の模様ができる。
+//   光の粒は、波の弱いところ(節)へ押し集められて浮かぶ。音源の位相がゆっくりずれると、節の模様が組み変わる。
+//   触ると、その場所に波を集める(焦点)。粒はそこから押しのけられて、輪になる。
+// =====================================================================
+const Float = (() => {
+  const NT = 6, LAMBDA = 62, K = 2 * Math.PI / LAMBDA, STEP = 4, G = Math.ceil(S / STEP) + 1;
+  const tx = [], ty = [];
+  for (let i = 0; i < NT; i++) { const a = i / NT * Math.PI * 2 + 0.26; tx.push(C + Math.cos(a) * R * 1.08); ty.push(C + Math.sin(a) * R * 1.08); }
+  const kr = new Float32Array(G * G * NT);           // 格子の点 → 各音源までの距離 × 波数
+  for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++)
+    for (let i = 0; i < NT; i++) kr[(gy * G + gx) * NT + i] = K * Math.hypot(gx * STEP - tx[i], gy * STEP - ty[i]);
+  const U = new Float32Array(G * G);                 // 波の強さ(0..1)
+  const phase = new Float32Array(NT), base = new Float32Array(NT);
+  for (let i = 0; i < NT; i++) base[i] = rnd() * 6.283;
+  let focusW = 0, fx = C, fy = C;
+
+  const NP = 1400, px = new Float32Array(NP), py = new Float32Array(NP), vx = new Float32Array(NP), vy = new Float32Array(NP), tw = new Float32Array(NP), sz = new Float32Array(NP);
+  for (let i = 0; i < NP; i++) { const a = rnd() * 6.283, r = Math.sqrt(rnd()) * (R - 10); px[i] = C + Math.cos(a) * r; py[i] = C + Math.sin(a) * r; tw[i] = rnd() * 6.283; sz[i] = 0.55 + rnd() * 0.9; }
+
+  const bg = document.createElement("canvas"); bg.width = bg.height = G;
+  const bgc = bg.getContext("2d"), bgImg = bgc.createImageData(G, G);
+  const trail = document.createElement("canvas"); trail.width = trail.height = S;
+  const tc = trail.getContext("2d");
+  const dot = document.createElement("canvas"); dot.width = dot.height = 24;
+  { const d = dot.getContext("2d"), g = d.createRadialGradient(12, 12, 0, 12, 12, 12);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.18, "rgba(235,245,255,.9)"); g.addColorStop(0.45, "rgba(160,200,255,.25)"); g.addColorStop(1, "rgba(120,160,255,0)");
+    d.fillStyle = g; d.fillRect(0, 0, 24, 24); }
+
+  function sampleU(x, y) {                           // 波の強さを、格子から補間して読む
+    const gx = Math.min(Math.max(x / STEP, 0), G - 1.001), gy = Math.min(Math.max(y / STEP, 0), G - 1.001);
+    const ix = gx | 0, iy = gy | 0, f = gx - ix, g = gy - iy, p = iy * G + ix;
+    return (U[p] * (1 - f) + U[p + 1] * f) * (1 - g) + (U[p + G] * (1 - f) + U[p + G + 1] * f) * g;
+  }
+  function step(dt, t) {
+    // 位相: ゆっくりずれる + 触っているあいだは、指の所へ波を集める
+    focusW += ((ptr.down ? 1 : 0) - focusW) * (1 - Math.exp(-dt * (ptr.down ? 6 : 1.2)));
+    if (ptr.down) { fx = ptr.x; fy = ptr.y; }
+    for (let i = 0; i < NT; i++) {
+      const wander = base[i] + 2.2 * Math.sin(t * 0.09 + i * 1.9) + 1.1 * Math.sin(t * 0.041 + i * 0.7);
+      const focus = -K * Math.hypot(fx - tx[i], fy - ty[i]);
+      let d = focus - wander; d -= Math.round(d / 6.283) * 6.283;
+      phase[i] = wander + d * focusW;
+    }
+    const cs = new Float32Array(NT), sn = new Float32Array(NT);
+    for (let i = 0; i < NT; i++) { cs[i] = Math.cos(phase[i]); sn[i] = Math.sin(phase[i]); }
+    for (let p = 0, q = 0; p < G * G; p++) {
+      let re = 0, im = 0;
+      for (let i = 0; i < NT; i++, q++) { const c = Math.cos(kr[q]), s = Math.sin(kr[q]); re += c * cs[i] - s * sn[i]; im += s * cs[i] + c * sn[i]; }
+      U[p] = (re * re + im * im) / (NT * NT);
+    }
+    // 粒: 波の強いところから弱いところへ(強さの坂を下る)、少しゆらぐ
+    const F = 5200, damp = Math.exp(-dt * 4.0), lim = R - 7;
+    for (let i = 0; i < NP; i++) {
+      const x = px[i], y = py[i], h = 2.0;
+      const gx = (sampleU(x + h, y) - sampleU(x - h, y)) / (2 * h), gy = (sampleU(x, y + h) - sampleU(x, y - h)) / (2 * h);
+      vx[i] = (vx[i] - gx * F * dt + (rnd() - 0.5) * 14 * dt) * damp;
+      vy[i] = (vy[i] - gy * F * dt + (rnd() - 0.5) * 14 * dt) * damp;
+      let nx = x + vx[i] * dt, ny = y + vy[i] * dt;
+      const dx = nx - C, dy = ny - C, d = Math.hypot(dx, dy);
+      if (d > lim) { nx = C + dx / d * lim; ny = C + dy / d * lim; vx[i] *= -0.3; vy[i] *= -0.3; }
+      px[i] = nx; py[i] = ny;
+    }
+  }
+  function draw(t) {
+    // 背景: 波の重なりの模様(ホログラムのように、うっすら)
+    const d = bgImg.data;
+    for (let p = 0; p < G * G; p++) {
+      const u = U[p], f = Math.sqrt(u);
+      const fringe = 0.5 + 0.5 * Math.cos(u * 18.0);
+      d[p * 4] = 3 + 26 * u + 16 * fringe * f; d[p * 4 + 1] = 6 + 48 * u + 26 * fringe * f; d[p * 4 + 2] = 14 + 92 * u + 40 * fringe * f; d[p * 4 + 3] = 255;
+    }
+    bgc.putImageData(bgImg, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(bg, 0, 0, G * STEP, G * STEP);
+    // 焦点のにじみ
+    if (focusW > 0.02) {
+      const g = ctx.createRadialGradient(fx, fy, 0, fx, fy, 60);
+      g.addColorStop(0, `rgba(190,220,255,${0.18 * focusW})`); g.addColorStop(1, "rgba(190,220,255,0)");
+      ctx.fillStyle = g; ctx.fillRect(fx - 60, fy - 60, 120, 120);
+    }
+    // 光の粒(残像を少し残す)
+    tc.globalCompositeOperation = "destination-out"; tc.fillStyle = "rgba(0,0,0,0.32)"; tc.fillRect(0, 0, S, S);
+    tc.globalCompositeOperation = "lighter";
+    for (let i = 0; i < NP; i++) {
+      const sp = Math.min(1, Math.hypot(vx[i], vy[i]) / 60);
+      const a = (0.45 + 0.4 * Math.sin(tw[i] + t * 2.3)) * (0.75 + 0.25 * sp);
+      const s = 4.6 * sz[i] * (1 + 0.6 * sp);
+      tc.globalAlpha = Math.max(0.05, a);
+      tc.drawImage(dot, px[i] - s, py[i] - s, s * 2, s * 2);
+    }
+    tc.globalAlpha = 1;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(trail, 0, 0);
+    ctx.globalCompositeOperation = "source-over";
+    // ふち(丸い画面の縁にかすかな光)
+    const rim = ctx.createRadialGradient(C, C, R - 30, C, C, R);
+    rim.addColorStop(0, "rgba(0,0,0,0)"); rim.addColorStop(1, "rgba(0,0,0,.55)");
+    ctx.fillStyle = rim; ctx.fillRect(0, 0, S, S);
+  }
+  return {
+    about: "<b>浮遊する光 NullFloat</b><br>まわりの6つの見えない音源から出た波が重なって、強いところと弱いところ(節)の模様ができます。光の粒は波の節へ押し集められて浮かび、格子や線を描きます。音源の位相がゆっくりずれると模様が組み変わり、粒もそれにつれて流れます。<br><b>触ると</b>:指の所に波が集まり(焦点)、粒が押しのけられて輪になります。なぞると、輪が指についていきます。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// 計算機自然の池 NullPond
+//   夕焼けの空を映す水面。水面はところどころ「デジタル化」して、ピクセルのモザイクになり、また自然の景色へ溶けて戻る。
+//   その境目が、ゆっくりと池の上を移ろう。触ると波紋が広がり、その場所がピクセルに結晶して、ゆっくり溶ける。
+// =====================================================================
+const Pond = (() => {
+  const W = S >> 1, H = W;                           // 水面の高さは半分の細かさで計算
+  let h0 = new Float32Array(W * H), h1 = new Float32Array(W * H);
+  // 空の絵(夕焼け・太陽・たなびく雲)
+  const sky = new Uint8ClampedArray(S * S * 3);
+  const cn = valueNoise(64, 7), cn2 = valueNoise(64, 11);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const v = y / S;
+    // 上: 群青 → 中: 紫・紅 → 太陽のあたり: 橙・金
+    let r, g, b;
+    if (v < 0.45) { const t = v / 0.45; r = 18 + 120 * t; g = 22 + 30 * t; b = 70 + 50 * t; }
+    else if (v < 0.62) { const t = (v - 0.45) / 0.17; r = 138 + 110 * t; g = 52 + 70 * t; b = 120 - 70 * t; }
+    else { const t = Math.min(1, (v - 0.62) / 0.38); r = 248 - 60 * t; g = 122 - 50 * t; b = 50 + 10 * t; }
+    // 雲(横にのびた帯)
+    const n = sampleNoise(cn, 64, x / 30, y / 7) * 0.65 + sampleNoise(cn2, 64, x / 13, y / 3.5) * 0.35;
+    const cloud = Math.max(0, n - 0.52) * 2.4 * (0.3 + 0.7 * Math.min(1, v * 1.8));
+    r = r * (1 - cloud * 0.5) + 255 * cloud * 0.55; g = g * (1 - cloud * 0.5) + 150 * cloud * 0.5; b = b * (1 - cloud * 0.5) + 140 * cloud * 0.45;
+    // 太陽
+    const dx = x - C, dy = y - S * 0.6, d = Math.hypot(dx, dy);
+    const sun = Math.max(0, 1 - d / 34), glow = Math.exp(-d / 70);
+    r += 255 * (sun > 0 ? 1 : 0) * Math.min(1, sun * 3) + 90 * glow; g += 220 * Math.min(1, sun * 3) + 60 * glow; b += 150 * Math.min(1, sun * 3) + 20 * glow;
+    const o = (y * S + x) * 3; sky[o] = r; sky[o + 1] = g; sky[o + 2] = b;
+  }
+  // デジタル化の場(ゆっくり動く) + 触った所の結晶
+  const qn = valueNoise(32, 23), qn2 = valueNoise(32, 31);
+  const QG = 59, boost = new Float32Array(QG * QG);   // 8 ピクセルおき
+  const level = new Uint8Array(QG * QG);
+  const img = ctx.createImageData(S, S), out = img.data;
+  let rainT = 0;
+
+  function drop(x, y, r, a) {
+    const cx = x / 2, cy = y / 2, rr = r / 2;
+    for (let j = Math.max(1, Math.floor(cy - rr * 2)); j < Math.min(H - 1, Math.ceil(cy + rr * 2)); j++)
+      for (let i = Math.max(1, Math.floor(cx - rr * 2)); i < Math.min(W - 1, Math.ceil(cx + rr * 2)); i++) {
+        const d2 = ((i - cx) ** 2 + (j - cy) ** 2) / (rr * rr);
+        h1[j * W + i] += a * Math.exp(-d2);
+      }
+  }
+  let lastX = -1, lastY = -1;
+  function step(dt, t) {
+    // 波(2回に分けて少し速く)
+    for (let k = 0; k < 2; k++) {
+      for (let j = 1; j < H - 1; j++) for (let i = 1; i < W - 1; i++) {
+        const p = j * W + i;
+        h0[p] = ((h1[p - 1] + h1[p + 1] + h1[p - W] + h1[p + W]) * 0.5 - h0[p]) * 0.986;
+      }
+      const tmp = h0; h0 = h1; h1 = tmp;
+    }
+    // 雨粒(ときどき)
+    rainT -= dt;
+    if (rainT < 0) { rainT = 0.35 + rnd() * 0.9; const a = rnd() * 6.283, r = Math.sqrt(rnd()) * (R - 20); drop(C + Math.cos(a) * r, C + Math.sin(a) * r, 3, 9); }
+    // 指: タップで大きな波紋、なぞると細い波紋の列。その場所はピクセルに結晶する
+    if (ptr.tapped) { drop(ptr.x, ptr.y, 7, 70); ptr.tapped = false; }
+    if (ptr.down) {
+      if (lastX >= 0 && Math.hypot(ptr.x - lastX, ptr.y - lastY) > 3) drop(ptr.x, ptr.y, 4, 14);
+      lastX = ptr.x; lastY = ptr.y;
+      const gx = ptr.x / 8, gy = ptr.y / 8;
+      for (let j = Math.max(0, Math.floor(gy - 6)); j < Math.min(QG, gy + 7); j++)
+        for (let i = Math.max(0, Math.floor(gx - 6)); i < Math.min(QG, gx + 7); i++) {
+          const d2 = ((i - gx) ** 2 + (j - gy) ** 2) / 14;
+          boost[j * QG + i] = Math.min(1.6, boost[j * QG + i] + Math.exp(-d2) * dt * 5);
+        }
+    } else lastX = -1;
+    const fade = Math.exp(-dt * 0.35);
+    for (let p = 0; p < QG * QG; p++) boost[p] *= fade;
+    // デジタル化の段階(0: 自然のまま / 1..3: 4・8・16 ピクセルのモザイク)
+    for (let j = 0; j < QG; j++) for (let i = 0; i < QG; i++) {
+      const n = sampleNoise(qn, 32, i / 9 + t * 0.05, j / 9 - t * 0.03) * 0.7 + sampleNoise(qn2, 32, i / 4 - t * 0.08, j / 4 + t * 0.06) * 0.3;
+      const q = Math.max(0, (n - 0.5) * 3.2) + boost[j * QG + i];
+      level[j * QG + i] = q < 0.35 ? 0 : q < 0.75 ? 1 : q < 1.15 ? 2 : 3;
+    }
+  }
+  const BS = [1, 4, 8, 16];
+  function draw(t) {
+    const K = 6.0;
+    for (let y = 0; y < S; y++) {
+      const hy = Math.min(H - 2, Math.max(1, y >> 1));
+      for (let x = 0; x < S; x++) {
+        const o = (y * S + x) * 4, p = y * S + x;
+        if (!inside[p]) { out[o] = out[o + 1] = out[o + 2] = 0; out[o + 3] = 255; continue; }
+        const lv = level[(y >> 3) * QG + (x >> 3)], b = BS[lv];
+        // モザイクの所は、ブロックのまん中で読む
+        const sx = b > 1 ? (x - x % b + (b >> 1)) : x, sy = b > 1 ? (y - y % b + (b >> 1)) : y;
+        const hx = Math.min(W - 2, Math.max(1, sx >> 1)), hyy = b > 1 ? Math.min(H - 2, Math.max(1, sy >> 1)) : hy;
+        const q = hyy * W + hx;
+        const dx = h1[q + 1] - h1[q - 1], dy = h1[q + W] - h1[q - W];
+        let ux = sx + dx * K, uy = sy + dy * K;
+        ux = ux < 0 ? 0 : ux > S - 1 ? S - 1 : ux; uy = uy < 0 ? 0 : uy > S - 1 ? S - 1 : uy;
+        const so = ((uy | 0) * S + (ux | 0)) * 3;
+        let r = sky[so], g = sky[so + 1], bl = sky[so + 2];
+        // 水の深み(わずかに暗く青く)と、波のきらめき
+        const spec = Math.max(0, -dy) * 9;
+        r = r * 0.82 + spec * 40; g = g * 0.84 + spec * 34; bl = bl * 0.9 + 14 + spec * 30;
+        if (b > 1) {
+          // デジタル: 色を段に丸めて、ブロックのすきまに細い線
+          const lvls = lv === 1 ? 10 : lv === 2 ? 6 : 4, st = 255 / (lvls - 1);
+          r = Math.round(r / st) * st; g = Math.round(g / st) * st; bl = Math.round(bl / st) * st;
+          if (x % b === 0 || y % b === 0) { r *= 0.55; g *= 0.6; bl *= 0.7; }
+        }
+        out[o] = r; out[o + 1] = g; out[o + 2] = bl; out[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const rim = ctx.createRadialGradient(C, C, R - 26, C, C, R);
+    rim.addColorStop(0, "rgba(0,0,0,0)"); rim.addColorStop(1, "rgba(0,0,0,.6)");
+    ctx.fillStyle = rim; ctx.fillRect(0, 0, S, S);
+  }
+  return {
+    about: "<b>計算機自然の池 NullPond</b><br>夕焼けの空を映す水面です。水面はところどころ「デジタル化」して、色が段になったピクセルのモザイクになり、またなめらかな自然の景色へ溶けて戻ります。その境目が、ゆっくり池の上を移ろいます。ときどき雨粒が落ちます。<br><b>触ると</b>:タップで波紋が広がり、指の下がピクセルに結晶して、しばらくすると溶けて戻ります。なぞると、細い波紋の列ができます。",
+    step, draw,
+  };
+})();
+
+
+// =====================================================================
+// 空中の光の点描 NullPlasma
+//   空中に光の点を打って描いた立体。点の集まりが、球 → トーラス → 蝶 → 二重らせん と、回りながら組み変わる。
+//   点はプラズマのように、ぱちぱちと瞬く。ドラッグで回せて、タップすると点がはじけて散り、また集まって形に戻る。
+// =====================================================================
+const Plasma = (() => {
+  const N = 1000;
+  const shapes = [];
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  { const a = []; for (let i = 0; i < N; i++) { const y = 1 - (i + 0.5) / N * 2, r = Math.sqrt(1 - y * y), th = i * golden; a.push([Math.cos(th) * r, y, Math.sin(th) * r]); } shapes.push(a); }   // 球
+  { const a = []; for (let i = 0; i < N; i++) { const u = i / N * Math.PI * 2 * 23, v = i * golden; const R0 = 0.68, r0 = 0.3; a.push([(R0 + r0 * Math.cos(v)) * Math.cos(u / 23 * 1), r0 * Math.sin(v), (R0 + r0 * Math.cos(v)) * Math.sin(u / 23 * 1)]); } shapes.push(a); }   // トーラス
+  { const a = []; for (let i = 0; i < N; i++) {                                                     // 蝶(羽の輪郭の内側を埋める)
+      const th = (i / N) * Math.PI * 24, k = 0.35 + 0.65 * ((i * 0.61803) % 1);
+      const r = Math.exp(Math.sin(th)) - 2 * Math.cos(4 * th) + Math.pow(Math.sin((2 * th - Math.PI) / 24), 5);
+      const x = Math.sin(th) * r * 0.21 * k, y = -Math.cos(th) * r * 0.21 * k;
+      a.push([x, y + 0.1, Math.abs(x) * 0.55 * Math.sin(i)]); } shapes.push(a); }
+  { const a = []; for (let i = 0; i < N; i++) {                                                     // 二重らせん + はしご
+      const strand = i % 3, t = (i / N) * 2 - 1, ang = t * Math.PI * 3.2;
+      if (strand < 2) { const o = strand ? Math.PI : 0; a.push([Math.cos(ang + o) * 0.42, t * 0.95, Math.sin(ang + o) * 0.42]); }
+      else { const f = ((i * 0.37) % 1) * 2 - 1, tt = Math.round(t * 18) / 18, aa = tt * Math.PI * 3.2; a.push([Math.cos(aa) * 0.42 * f, tt * 0.95, Math.sin(aa) * 0.42 * f]); } }
+    shapes.push(a); }
+  const P = new Float32Array(N * 3), V = new Float32Array(N * 3), delay = new Float32Array(N), seed = new Float32Array(N);
+  for (let i = 0; i < N; i++) { const q = shapes[0][i]; P[i * 3] = q[0]; P[i * 3 + 1] = q[1]; P[i * 3 + 2] = q[2]; delay[i] = rnd() * 0.6; seed[i] = rnd() * 100; }
+  let shapeIdx = 0, shapeT = 0, yaw = 0.4, pitch = -0.25, yawV = 0.25, pitchV = 0, lastX = 0, lastY = 0, dragging = false, burst = 0;
+  const trail = document.createElement("canvas"); trail.width = trail.height = S;
+  const tc = trail.getContext("2d");
+  const dot = document.createElement("canvas"); dot.width = dot.height = 32;
+  { const d = dot.getContext("2d"), g = d.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.12, "rgba(255,240,255,.95)"); g.addColorStop(0.35, "rgba(200,170,255,.35)"); g.addColorStop(1, "rgba(140,120,255,0)");
+    d.fillStyle = g; d.fillRect(0, 0, 32, 32); }
+  function step(dt, t) {
+    // 形の切り替え(9 秒ごと)
+    shapeT += dt;
+    if (shapeT > 9) { shapeT = 0; shapeIdx = (shapeIdx + 1) % shapes.length; for (let i = 0; i < N; i++) delay[i] = rnd() * 0.8; }
+    // 指: ドラッグで回す、タップではじける
+    if (ptr.down) {
+      if (!dragging) { dragging = true; lastX = ptr.x; lastY = ptr.y; }
+      const dx = ptr.x - lastX, dy = ptr.y - lastY; lastX = ptr.x; lastY = ptr.y;
+      yawV = dx * 0.6; pitchV = dy * 0.6;
+    } else { dragging = false; yawV += (0.25 - yawV) * (1 - Math.exp(-dt * 0.8)); pitchV *= Math.exp(-dt * 2); }
+    if (ptr.tapped) {
+      ptr.tapped = false; burst = 1;
+      for (let i = 0; i < N; i++) { const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2], l = Math.hypot(x, y, z) + 0.2; const k = 2.2 + rnd() * 2.5;
+        V[i * 3] += x / l * k + (rnd() - 0.5); V[i * 3 + 1] += y / l * k + (rnd() - 0.5); V[i * 3 + 2] += z / l * k + (rnd() - 0.5); }
+    }
+    burst *= Math.exp(-dt * 2);
+    yaw += yawV * dt; pitch = Math.max(-1.2, Math.min(1.2, pitch + pitchV * dt + (-0.25 - pitch) * dt * 0.3));
+    // 点: ばねで、今の形の位置へ(1 点ずつ少し遅れて)
+    const tgt = shapes[shapeIdx], kS = 9, damp = Math.exp(-dt * 3.5);
+    for (let i = 0; i < N; i++) {
+      const go = shapeT > delay[i] ? 1 : 0.05;
+      for (let c = 0; c < 3; c++) {
+        const j = i * 3 + c, wob = 0.012 * Math.sin(t * 3 + seed[i] + c);
+        V[j] = (V[j] + (tgt[i][c] + wob - P[j]) * kS * go * dt) * damp;
+        P[j] += V[j] * dt;
+      }
+    }
+  }
+  function draw(t) {
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, S, S);
+    // ふわっとした空気の光
+    const g = ctx.createRadialGradient(C, C * 1.05, 10, C, C, R);
+    g.addColorStop(0, `rgba(60,40,110,${0.22 + 0.25 * burst})`); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+    tc.globalCompositeOperation = "destination-out"; tc.fillStyle = "rgba(0,0,0,0.45)"; tc.fillRect(0, 0, S, S);
+    tc.globalCompositeOperation = "lighter";
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), D = 3.2, sc = R * 0.62;
+    for (let i = 0; i < N; i++) {
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+      const x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
+      const y2 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
+      const k = D / (D - z2), X = C + x1 * sc * k, Y = C - y2 * sc * k;
+      // プラズマの瞬き: 点ごとに、ぱちぱちと明るさが跳ぶ
+      const fl = Math.sin(t * 37 + seed[i] * 7.1) * Math.sin(t * 23.3 + seed[i] * 3.3);
+      const a = Math.max(0, 0.35 + 0.65 * fl) * (0.55 + 0.45 * (z2 + 1) / 2);
+      if (a < 0.05) continue;
+      const s = (3.2 + 2.2 * k) * (0.8 + 0.4 * a);
+      tc.globalAlpha = Math.min(1, a);
+      tc.drawImage(dot, X - s, Y - s, s * 2, s * 2);
+    }
+    tc.globalAlpha = 1;
+    ctx.globalCompositeOperation = "lighter"; ctx.drawImage(trail, 0, 0); ctx.globalCompositeOperation = "source-over";
+  }
+  return {
+    about: "<b>空中の光の点描 NullPlasma</b><br>空中に光の点を打って描いた立体のイメージです。1000 の点が、球 → トーラス → 蝶 → 二重らせん と、回りながら1点ずつ少し遅れて組み変わります。点はプラズマのように、ぱちぱちと瞬きます。<br><b>触ると</b>:ドラッグで立体を回せます。タップすると点がはじけて散り、また集まって形に戻ります。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// 金継ぎの計算 NullKintsugi
+//   黒い漆の器。叩くとヒビが走り、そのヒビに金がゆっくり流れこんで継がれていく。
+//   壊れたところが、いちばん美しい線になる。触らなくても、ときどき自然にヒビが入る。
+// =====================================================================
+const Kintsugi = (() => {
+  // 漆の面(深い黒に、かすかな赤みと映り込みの帯)
+  const base = document.createElement("canvas"); base.width = base.height = S;
+  { const b = base.getContext("2d"), im = b.createImageData(S, S), d = im.data, n1 = valueNoise(48, 5), n2 = valueNoise(48, 9);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const o = (y * S + x) * 4, dx = (x - C) / R, dy = (y - C) / R, rr = dx * dx + dy * dy;
+      const band = Math.exp(-Math.pow((dx * 0.8 + dy * 0.6 + 0.35) / 0.18, 2)) * 0.55 + Math.exp(-Math.pow((dx * 0.8 + dy * 0.6 - 0.55) / 0.05, 2)) * 0.25;
+      const grain = sampleNoise(n1, 48, x / 9, y / 9) * 0.6 + sampleNoise(n2, 48, x / 3, y / 3) * 0.4;
+      const bowl = 1 - 0.35 * rr;                                    // 器の内側の丸み
+      const v = (7 + 22 * band * bowl + 5 * grain) * bowl;
+      d[o] = v * 1.25 + 2; d[o + 1] = v * 0.92; d[o + 2] = v * 0.85; d[o + 3] = 255;
+    }
+    b.putImageData(im, 0, 0);
+    // 器のふち
+    b.strokeStyle = "rgba(255,230,200,.07)"; b.lineWidth = 2; b.beginPath(); b.arc(C, C, R - 14, 0, Math.PI * 2); b.stroke(); }
+  const crackL = document.createElement("canvas"); crackL.width = crackL.height = S; const cc = crackL.getContext("2d");
+  const goldM = document.createElement("canvas"); goldM.width = goldM.height = S; const gm = goldM.getContext("2d");
+  const goldT = document.createElement("canvas"); goldT.width = goldT.height = S; const gt = goldT.getContext("2d");
+  cc.lineCap = gm.lineCap = "round"; cc.lineJoin = gm.lineJoin = "round";
+  let segs = [], ci = 0, gi = 0, clock = 0, idle = 0, flashes = [], total = 0;
+  const CRACK_SPEED = 520, GOLD_SPEED = 95, GOLD_DELAY = 0.9;
+  function crack(x0, y0) {
+    const start = clock, list = [];
+    const grow = (x, y, ang, budget, w, dist) => {
+      let len = 0;
+      while (len < budget) {
+        const st = 5 + rnd() * 7;
+        ang += (rnd() - 0.5) * 0.32 + (rnd() < 0.08 ? (rnd() - 0.5) * 1.1 : 0);   // ほぼまっすぐ、ときどきカクッと折れる
+        const nx = x + Math.cos(ang) * st, ny = y + Math.sin(ang) * st;
+        if (Math.hypot(nx - C, ny - C) > R - 16) break;
+        list.push({ x0: x, y0: y, x1: nx, y1: ny, w, tc: start + (dist + len) / CRACK_SPEED, tg: start + GOLD_DELAY + (dist + len) / GOLD_SPEED });
+        x = nx; y = ny; len += st;
+        if (rnd() < 0.045 && w > 0.6) grow(x, y, ang + (rnd() < 0.5 ? 1 : -1) * (0.6 + rnd() * 0.7), budget * (0.3 + rnd() * 0.3), w * 0.7, dist + len);
+      }
+    };
+    const n = 2 + (rnd() * 3 | 0), a0 = rnd() * 6.283;
+    for (let k = 0; k < n; k++) grow(x0, y0, a0 + k / n * 6.283 + (rnd() - 0.5) * 0.8, 70 + rnd() * 160, 1 + rnd() * 0.4, 0);
+    segs = segs.concat(list);
+    segs.sort((a, b) => a.tc - b.tc);           // ヒビの順に並べ直す(描く位置を見直す)
+    ci = segs.findIndex(s => s.tc > clock); if (ci < 0) ci = segs.length;
+    flashes.push({ x: x0, y: y0, t: 0 });
+    total++;
+  }
+  const goldOrder = () => segs.slice().sort((a, b) => a.tg - b.tg);
+  let gsegs = [];
+  function step(dt, t) {
+    clock += dt; idle += dt;
+    if (ptr.tapped) { ptr.tapped = false; idle = 0;
+      if (Math.hypot(ptr.x - C, ptr.y - C) < R - 22) { crack(ptr.x, ptr.y); gsegs = goldOrder(); gi = gsegs.findIndex(s => s.tg > clock); if (gi < 0) gi = gsegs.length; } }
+    if (idle > 5.5) { idle = 0; const a = rnd() * 6.283, r = Math.sqrt(rnd()) * (R - 60); crack(C + Math.cos(a) * r, C + Math.sin(a) * r); gsegs = goldOrder(); gi = gsegs.findIndex(s => s.tg > clock); if (gi < 0) gi = gsegs.length; }
+    // ヒビ: 時間になった線を、ヒビの層に描きたす
+    while (ci < segs.length && segs[ci].tc <= clock) {
+      const s = segs[ci++];
+      cc.strokeStyle = "rgba(0,0,0,.95)"; cc.lineWidth = s.w * 1.4; cc.beginPath(); cc.moveTo(s.x0, s.y0); cc.lineTo(s.x1, s.y1); cc.stroke();
+      cc.strokeStyle = "rgba(255,235,210,.28)"; cc.lineWidth = 0.8; cc.beginPath(); cc.moveTo(s.x0 + 0.8, s.y0 + 0.8); cc.lineTo(s.x1 + 0.8, s.y1 + 0.8); cc.stroke();
+    }
+    // 金: ヒビのあとを、ゆっくり流れて継いでいく
+    while (gi < gsegs.length && gsegs[gi].tg <= clock) {
+      const s = gsegs[gi++];
+      gm.strokeStyle = "#fff"; gm.lineWidth = 1.1 + s.w * 1.3; gm.beginPath(); gm.moveTo(s.x0, s.y0); gm.lineTo(s.x1, s.y1); gm.stroke();
+    }
+    for (const f of flashes) f.t += dt;
+    flashes = flashes.filter(f => f.t < 0.7);
+    // 器がいっぱいになったら、そっと新しい器に(古い線を少しずつ薄く)
+    if (total > 40) { cc.globalCompositeOperation = gm.globalCompositeOperation = "destination-out"; cc.fillStyle = gm.fillStyle = "rgba(0,0,0,0.02)";
+      cc.fillRect(0, 0, S, S); gm.fillRect(0, 0, S, S); cc.globalCompositeOperation = gm.globalCompositeOperation = "source-over";
+      if ((clock * 10 | 0) % 50 === 0 && segs.length > 6000) { segs = segs.filter(s => s.tg > clock - 5); gsegs = goldOrder(); ci = segs.findIndex(s => s.tc > clock); if (ci < 0) ci = segs.length; gi = gsegs.findIndex(s => s.tg > clock); if (gi < 0) gi = gsegs.length; total = 0; } }
+  }
+  function draw(t) {
+    ctx.drawImage(base, 0, 0);
+    ctx.drawImage(crackL, 0, 0);
+    // 金: 光の帯がゆっくり器の上をすべる
+    gt.globalCompositeOperation = "source-over"; gt.clearRect(0, 0, S, S); gt.drawImage(goldM, 0, 0);
+    gt.globalCompositeOperation = "source-in";
+    const a = t * 0.25, ux = Math.cos(a), uy = Math.sin(a);
+    const gr = gt.createLinearGradient(C - ux * R, C - uy * R, C + ux * R, C + uy * R);
+    const ph = (Math.sin(t * 0.6) * 0.5 + 0.5) * 0.7 + 0.15;
+    gr.addColorStop(0, "#6b4512"); gr.addColorStop(Math.max(0, ph - 0.15), "#b98226"); gr.addColorStop(ph, "#fff1b8");
+    gr.addColorStop(Math.min(1, ph + 0.15), "#c8922f"); gr.addColorStop(1, "#7a5016");
+    gt.fillStyle = gr; gt.fillRect(0, 0, S, S);
+    ctx.drawImage(goldT, 0, 0);
+    // 金のにじむ光
+    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 0.25; ctx.filter = "blur(3px)"; ctx.drawImage(goldT, 0, 0);
+    ctx.filter = "none"; ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    // 叩いた瞬間の、かすかな光
+    for (const f of flashes) {
+      const k = 1 - f.t / 0.7, g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 26 + 40 * f.t);
+      g.addColorStop(0, `rgba(255,240,220,${0.35 * k})`); g.addColorStop(1, "rgba(255,240,220,0)");
+      ctx.fillStyle = g; ctx.fillRect(f.x - 70, f.y - 70, 140, 140);
+    }
+  }
+  crack(C - 30, C + 20); gsegs = goldOrder();
+  return {
+    about: "<b>金継ぎの計算 NullKintsugi</b><br>黒い漆の器です。叩くとヒビが枝分かれしながら走り、そのヒビに金がゆっくり流れこんで継がれていきます。壊れたところが、いちばん美しい線になります。金の上を光の帯がすべり、しばらく触らなくても、ときどき自然にヒビが入ります。器がいっぱいになると、古い線から少しずつ薄れて、新しい器になっていきます。<br><b>触ると</b>:タップした所からヒビが入り、少し遅れて金が流れこみます。",
+    step, draw,
+  };
+})();
+
+
+// =====================================================================
+// 無限の鏡の部屋 NullInfinity
+//   合わせ鏡の部屋。鏡のふちと光の点が、奥へ奥へと少しずつ小さく、回りながら無限に続く。
+//   奥へ行くほど、光は少しずつ色を変えて暗くなる。指を置くと、そちらへ奥(消失点)がずれる。タップで光がひとつ増える。
+// =====================================================================
+const Infinity_ = (() => {
+  const DEPTH = 26, RATIO = 0.86;
+  let lights = [], vpx = C, vpy = C, twist = 0;
+  for (let i = 0; i < 7; i++) addLight(rnd() * 6.283, 0.55 + rnd() * 0.35);
+  function addLight(a, r) { lights.push({ a, r, hue: rnd(), ph: rnd() * 6.283, born: 0 }); if (lights.length > 18) lights.shift(); }
+  const dot = document.createElement("canvas"); dot.width = dot.height = 32;
+  { const d = dot.getContext("2d"), g = d.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.2, "rgba(255,255,255,.75)"); g.addColorStop(0.5, "rgba(255,255,255,.18)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    d.fillStyle = g; d.fillRect(0, 0, 32, 32); }
+  const tint = document.createElement("canvas"); tint.width = tint.height = 32; const tg = tint.getContext("2d");
+  function step(dt, t) {
+    const tx = ptr.down ? ptr.x : C + Math.sin(t * 0.13) * 22, ty = ptr.down ? ptr.y : C + Math.cos(t * 0.11) * 18;
+    vpx += (tx - vpx) * (1 - Math.exp(-dt * 2.5)); vpy += (ty - vpy) * (1 - Math.exp(-dt * 2.5));
+    twist = 0.035 * Math.sin(t * 0.07) + 0.02;
+    if (ptr.tapped) { ptr.tapped = false; addLight(Math.atan2(ptr.y - C, ptr.x - C), Math.min(0.92, Math.hypot(ptr.x - C, ptr.y - C) / R + 0.1)); }
+    for (const l of lights) { l.a += dt * 0.05; l.born = Math.min(1, l.born + dt * 1.5); }
+  }
+  function draw(t) {
+    ctx.fillStyle = "#000"; ctx.fillRect(0, 0, S, S);
+    ctx.globalCompositeOperation = "lighter";
+    // 奥から手前へ
+    for (let i = DEPTH - 1; i >= 0; i--) {
+      const s = Math.pow(RATIO, i), rot = i * twist + t * 0.01 * i;
+      const cx = vpx + (C - vpx) * s, cy = vpy + (C - vpy) * s;    // 手前ほど画面の中心、奥ほど消失点へ
+      const half = R * 0.93 * s, fade = Math.pow(0.88, i);
+      // 鏡のふち(角の丸い四角)
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(rot);
+      ctx.strokeStyle = `rgba(${170 + 60 * Math.sin(i * 0.4 + t * 0.5)},${200},${255},${0.32 * fade})`;
+      ctx.lineWidth = Math.max(0.6, 2.2 * s);
+      const rr = half * 0.12;
+      ctx.beginPath(); ctx.roundRect(-half, -half, half * 2, half * 2, rr); ctx.stroke();
+      // 鏡に映る光の点
+      for (const l of lights) {
+        const br = (0.55 + 0.45 * Math.sin(t * 1.3 + l.ph + i * 0.35)) * fade * l.born;
+        if (br < 0.02) continue;
+        const h = (l.hue + i * 0.018) % 1, [r, g, b] = hsl(h, 0.65, 0.62);
+        const x = Math.cos(l.a) * l.r * half, y = Math.sin(l.a) * l.r * half, sz = 14 * s + 2;
+        tg.globalCompositeOperation = "source-over"; tg.clearRect(0, 0, 32, 32); tg.drawImage(dot, 0, 0);
+        tg.globalCompositeOperation = "source-in"; tg.fillStyle = `rgb(${r},${g},${b})`; tg.fillRect(0, 0, 32, 32);
+        ctx.globalAlpha = Math.min(1, br); ctx.drawImage(tint, x - sz, y - sz, sz * 2, sz * 2);
+        ctx.globalAlpha = Math.min(1, br * 0.9); ctx.drawImage(dot, x - sz * 0.35, y - sz * 0.35, sz * 0.7, sz * 0.7);
+      }
+      ctx.globalAlpha = 1; ctx.restore();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+  function hsl(h, s, l) { const a = s * Math.min(l, 1 - l), f = n => { const k = (n + h * 12) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return [f(0) * 255 | 0, f(8) * 255 | 0, f(4) * 255 | 0]; }
+  return {
+    about: "<b>無限の鏡の部屋 NullInfinity</b><br>合わせ鏡の部屋です。鏡のふちと光の点が、奥へ奥へと少しずつ小さく、ゆっくり回りながら無限に続きます。奥へ行くほど、光は少しずつ色を変えて暗くなります。<br><b>触ると</b>:指を置いた方へ、部屋の奥(消失点)がずれます。タップすると、その場所に光がひとつ増えます。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// デジタルの分身 NullTwin
+//   光の小さな立方体(ボクセル)でできた人の姿。走査線が上下に動き、通ったところから形が組み上がり、また崩れていく。
+//   床には鏡像が映る。ドラッグで回り、タップで立方体がほどけて散り、また戻る。
+// =====================================================================
+const Twin = (() => {
+  // 人の形(頭・胴・腕・脚を楕円体と円柱で)。その表面に点を置く
+  const parts = [
+    { t: "e", c: [0, 0.78, 0], r: [0.11, 0.13, 0.11] },          // 頭
+    { t: "e", c: [0, 0.43, 0], r: [0.2, 0.25, 0.12] },           // 胸
+    { t: "e", c: [0, 0.12, 0], r: [0.17, 0.14, 0.11] },          // 腰
+    { t: "c", a: [-0.24, 0.6, 0], b: [-0.34, 0.2, 0.04], r: 0.055 },  // 左腕
+    { t: "c", a: [0.24, 0.6, 0], b: [0.34, 0.2, 0.04], r: 0.055 },    // 右腕
+    { t: "c", a: [-0.34, 0.2, 0.04], b: [-0.3, -0.12, 0.1], r: 0.045 },
+    { t: "c", a: [0.34, 0.2, 0.04], b: [0.3, -0.12, 0.1], r: 0.045 },
+    { t: "c", a: [-0.09, 0.0, 0], b: [-0.11, -0.45, 0.02], r: 0.075 }, // 脚
+    { t: "c", a: [0.09, 0.0, 0], b: [0.11, -0.45, 0.02], r: 0.075 },
+    { t: "c", a: [-0.11, -0.45, 0.02], b: [-0.12, -0.88, 0.0], r: 0.06 },
+    { t: "c", a: [0.11, -0.45, 0.02], b: [0.12, -0.88, 0.0], r: 0.06 },
+  ];
+  const N = 1700, home = new Float32Array(N * 3), P = new Float32Array(N * 3), V = new Float32Array(N * 3), seed = new Float32Array(N);
+  { const area = parts.map(p => p.t === "e" ? 4 * Math.PI * Math.pow((p.r[0] * p.r[1] + p.r[0] * p.r[2] + p.r[1] * p.r[2]) / 3, 1) : 2 * Math.PI * p.r * Math.hypot(p.b[0] - p.a[0], p.b[1] - p.a[1], p.b[2] - p.a[2]));
+    const tot = area.reduce((a, b) => a + b, 0);
+    let i = 0;
+    parts.forEach((p, k) => {
+      const n = k === parts.length - 1 ? N - i : Math.round(N * area[k] / tot);
+      for (let j = 0; j < n && i < N; j++, i++) {
+        let x, y, z;
+        if (p.t === "e") { const u = rnd() * 2 - 1, th = rnd() * 6.283, s = Math.sqrt(1 - u * u); x = p.c[0] + p.r[0] * s * Math.cos(th); y = p.c[1] + p.r[1] * u; z = p.c[2] + p.r[2] * s * Math.sin(th); }
+        else { const f = rnd(), th = rnd() * 6.283; x = p.a[0] + (p.b[0] - p.a[0]) * f + p.r * Math.cos(th); y = p.a[1] + (p.b[1] - p.a[1]) * f; z = p.a[2] + (p.b[2] - p.a[2]) * f + p.r * Math.sin(th); }
+        home[i * 3] = x; home[i * 3 + 1] = y; home[i * 3 + 2] = z;
+        P[i * 3] = x + (rnd() - 0.5) * 0.3; P[i * 3 + 1] = y - rnd() * 0.3; P[i * 3 + 2] = z + (rnd() - 0.5) * 0.3; seed[i] = rnd() * 100;
+      }
+    }); }
+  let yaw = 0.3, yawV = 0.18, dragging = false, lastX = 0, scan = -1.1, scanDir = 1, burst = 0;
+  const order = new Int32Array(N), depth = new Float32Array(N), sx = new Float32Array(N), sy = new Float32Array(N), sz = new Float32Array(N);
+  function step(dt, t) {
+    if (ptr.down) { if (!dragging) { dragging = true; lastX = ptr.x; } yawV = (ptr.x - lastX) * 0.012 / Math.max(dt, 0.008); lastX = ptr.x; }
+    else { dragging = false; yawV += (0.18 - yawV) * (1 - Math.exp(-dt * 0.8)); }
+    yaw += yawV * dt;
+    if (ptr.tapped) { ptr.tapped = false; burst = 1;
+      for (let i = 0; i < N; i++) { V[i * 3] += (rnd() - 0.5) * 3 + home[i * 3] * 2; V[i * 3 + 1] += (rnd() - 0.2) * 2.5; V[i * 3 + 2] += (rnd() - 0.5) * 3 + home[i * 3 + 2] * 2; } }
+    burst *= Math.exp(-dt * 0.8);
+    // 走査線: 上下に行き来する(通ったところが組み上がる / 戻るときに崩れる)
+    scan += scanDir * dt * 0.32;
+    if (scan > 1.15) { scanDir = -1; } if (scan < -1.15) { scanDir = 1; }
+    const breath = 0.012 * Math.sin(t * 1.4);
+    for (let i = 0; i < N; i++) {
+      const hy = home[i * 3 + 1];
+      const built = scanDir > 0 ? hy < scan : hy > scan;            // 上がるときは下から組み、下がるときは上から崩す
+      const k = built ? 7 : 1.6, damp = Math.exp(-dt * (built ? 4 : 1.5));
+      for (let c = 0; c < 3; c++) {
+        const j = i * 3 + c;
+        let target = home[j] + (c === 0 ? home[j] * breath * 3 : 0);
+        if (!built) target += (c === 1 ? -0.07 - 0.05 * Math.sin(seed[i]) : 0) + 0.06 * Math.sin(seed[i] * 1.7 + c * 2 + t * 0.9);
+        V[j] = (V[j] + (target - P[j]) * k * dt) * damp;
+        P[j] += V[j] * dt;
+      }
+    }
+  }
+  function draw(t) {
+    const g = ctx.createLinearGradient(0, 0, 0, S);
+    g.addColorStop(0, "#03050a"); g.addColorStop(0.68, "#0a1220"); g.addColorStop(0.7, "#04070c"); g.addColorStop(1, "#010203");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+    const floorY = S * 0.82, sc = R * 0.62, cy = Math.cos(yaw), syw = Math.sin(yaw), D = 4;
+    for (let i = 0; i < N; i++) {
+      const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+      const x1 = x * cy + z * syw, z1 = -x * syw + z * cy, k = D / (D - z1);
+      sx[i] = C + x1 * sc * k; sy[i] = floorY - (y + 0.9) * sc * k; sz[i] = k; depth[i] = z1; order[i] = i;
+    }
+    order.sort((a, b) => depth[a] - depth[b]);
+    // 床の鏡像(うすく、下へ)
+    ctx.globalAlpha = 0.18;
+    for (const i of order) { const yy = floorY + (floorY - sy[i]) * 0.9; if (yy > S) continue; const s = 3.2 * sz[i]; ctx.fillStyle = "#7fb6ff"; ctx.fillRect(sx[i] - s / 2, yy - s / 2, s, s * 0.6); }
+    ctx.globalAlpha = 1;
+    // 分身(手前ほど明るく。走査線の近くは白く光る)
+    for (const i of order) {
+      const hy = home[i * 3 + 1], near = Math.max(0, 1 - Math.abs(hy - scan) * 9), d = (depth[i] + 1) / 2;
+      const built = scanDir > 0 ? hy < scan : hy > scan, k = built ? 1 : 0.45;   // 組み上がった所は明るく、崩れた所は暗く
+      const s = 3.4 * sz[i] * (built ? 1 : 0.8);
+      const r = (40 + 110 * d) * k + 180 * near, gg = (90 + 110 * d) * k + 130 * near, b = (150 + 100 * d) * k + 40 * near;
+      ctx.fillStyle = `rgb(${r | 0},${gg | 0},${Math.min(255, b) | 0})`;
+      ctx.fillRect(sx[i] - s / 2, sy[i] - s / 2, s, s);
+    }
+    // 走査線
+    const ly = floorY - (scan + 0.9) * sc;
+    const lg = ctx.createLinearGradient(0, ly - 10, 0, ly + 10);
+    lg.addColorStop(0, "rgba(140,220,255,0)"); lg.addColorStop(0.5, "rgba(170,235,255,.55)"); lg.addColorStop(1, "rgba(140,220,255,0)");
+    ctx.fillStyle = lg; ctx.fillRect(0, ly - 10, S, 20);
+    // 床の線
+    ctx.strokeStyle = "rgba(120,170,230,.25)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, floorY + 2); ctx.lineTo(S, floorY + 2); ctx.stroke();
+  }
+  return {
+    about: "<b>デジタルの分身 NullTwin</b><br>光の小さな立方体でできた人の姿です。走査線が上下に行き来し、上がるときは通ったところから形が組み上がり、下がるときは上から崩れていきます。床には、うっすら鏡像が映ります。<br><b>触ると</b>:ドラッグで分身が回ります。タップすると立方体がほどけて散り、また集まってきます。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// 鏡の雫 NullDrop
+//   液体金属のような鏡の雫が、まわりの景色(空・窓の光・床)を映しながら、くっついたり離れたりする。
+//   ドラッグで、いちばん近い雫を引っぱれる。タップで小さな雫が生まれて、ほかの雫に吸いこまれる。
+// =====================================================================
+const Drop = (() => {
+  const G = 2, Wd = S / G | 0;                     // 2 ピクセルおきに場を計算
+  const field = new Float32Array(Wd * Wd);
+  const img = ctx.createImageData(S, S), out = img.data;
+  let balls = [];
+  for (let i = 0; i < 6; i++) { const a = i / 6 * 6.283; balls.push({ x: C + Math.cos(a) * R * 0.45, y: C + Math.sin(a) * R * 0.45, vx: 0, vy: 0, r: (24 + rnd() * 22) * S / 466, ph: rnd() * 6.283, home: a, life: 1e9 }); }
+  let grab = -1;
+  // まわりの景色(上: 空、まん中: 窓の光の帯、下: 暗い床)— 反射する向きで読む
+  function env(nx, ny, nz, t) {
+    // 反射: 目は正面(0,0,1)から
+    const rx = 2 * nz * nx, ry = 2 * nz * ny, rz = 2 * nz * nz - 1;
+    const up = -ry;
+    let r, g, b;
+    if (up > 0.15) { const k = Math.min(1, (up - 0.15) * 1.6); r = 150 - 110 * k; g = 180 - 100 * k; b = 230 - 80 * k; }
+    else if (up > -0.15) { r = 230; g = 225; b = 215; }
+    else { const k = Math.min(1, (-up - 0.15) * 2); r = 60 - 45 * k; g = 55 - 42 * k; b = 52 - 38 * k; }
+    // 窓の光の帯(縦じま)
+    const win = Math.sin(rx * 9 + t * 0.2) > 0.82 ? 1 : 0;
+    r += win * 90; g += win * 90; b += win * 95;
+    // 正面からの映り込み(暗い)
+    const facing = Math.max(0, rz);
+    r = r * (0.35 + 0.65 * (1 - facing * 0.6)); g = g * (0.35 + 0.65 * (1 - facing * 0.6)); b = b * (0.4 + 0.6 * (1 - facing * 0.55));
+    return [r, g, b];
+  }
+  function step(dt, t) {
+    // 指: ドラッグで近い雫を引く / タップで小さな雫
+    if (ptr.down) {
+      if (grab < 0) { let best = 1e9; balls.forEach((b, i) => { const d = Math.hypot(b.x - ptr.x, b.y - ptr.y); if (d < best) { best = d; grab = i; } }); }
+    } else grab = -1;
+    if (ptr.tapped) { ptr.tapped = false; balls.push({ x: ptr.x, y: ptr.y, vx: (rnd() - 0.5) * 60, vy: -40, r: 14 * S / 466, ph: rnd() * 6.283, life: 6 }); }
+    for (let i = 0; i < balls.length; i++) {
+      const b = balls[i];
+      let ax = 0, ay = 0;
+      // ゆっくりさまよう + 中心へ戻る + 互いに少し引き合う
+      // 自分の場所(円の上をゆっくり回る。ときどき中心へ寄る)のまわりをさまよう
+      if (b.home !== undefined) {
+        const hr = R * (0.42 + 0.3 * Math.sin(t * 0.11 + b.ph)), ha = b.home + t * 0.07;
+        ax += (C + Math.cos(ha) * hr - b.x) * 0.9 + Math.sin(t * 0.5 + b.ph) * 25; ay += (C + Math.sin(ha) * hr - b.y) * 0.9 + Math.cos(t * 0.43 + b.ph * 1.3) * 25;
+      } else { ay += 60; }                            // 小さな雫は、少し落ちていく
+      for (const o of balls) { if (o === b) continue; const dx = o.x - b.x, dy = o.y - b.y, d = Math.hypot(dx, dy) + 1; if (d < (o.r + b.r) * 1.6) { ax += dx / d * 30; ay += dy / d * 30; } }
+      if (i === grab) { ax += (ptr.x - b.x) * 30 - b.vx * 6; ay += (ptr.y - b.y) * 30 - b.vy * 6; }
+      b.vx = (b.vx + ax * dt) * Math.exp(-dt * 1.2); b.vy = (b.vy + ay * dt) * Math.exp(-dt * 1.2);
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      const d = Math.hypot(b.x - C, b.y - C), lim = R - b.r * 0.6;
+      if (d > lim) { b.x = C + (b.x - C) / d * lim; b.y = C + (b.y - C) / d * lim; b.vx *= -0.4; b.vy *= -0.4; }
+      b.life -= dt;
+    }
+    // 小さな雫は、大きな雫に近づくと吸いこまれる(大きい方が少し育つ)
+    for (let i = balls.length - 1; i >= 0; i--) {
+      const b = balls[i]; if (b.life > 1e8) continue;
+      for (const o of balls) { if (o === b || o.life < 1e8) continue; if (Math.hypot(o.x - b.x, o.y - b.y) < o.r * 0.7) { o.r = Math.min(70 * S / 466, Math.sqrt(o.r * o.r + b.r * b.r * 0.5)); b.life = 0; break; } }
+      if (b.life <= 0) { balls.splice(i, 1); grab = -1; }
+    }
+    // 大きくなりすぎたら、ゆっくり元へ
+    for (const b of balls) if (b.life > 1e8) b.r += ((26 + 20 * Math.sin(b.ph)) * S / 466 + 13 - b.r) * dt * 0.05;
+  }
+  function draw(t) {
+    // 場(メタボール): 各点で Σ r²/d²
+    for (let j = 0; j < Wd; j++) for (let i = 0; i < Wd; i++) {
+      const x = i * G, y = j * G; let f = 0;
+      for (const b of balls) { const dx = x - b.x, dy = y - b.y; f += b.r * b.r / (dx * dx + dy * dy + 1); }
+      field[j * Wd + i] = f;
+    }
+    for (let y = 0; y < S; y++) {
+      const j = Math.min(Wd - 2, y / G | 0);
+      for (let x = 0; x < S; x++) {
+        const o = (y * S + x) * 4, i = Math.min(Wd - 2, x / G | 0), p = j * Wd + i;
+        const f = field[p];
+        if (f < 0.85 || !inside[y * S + x]) {
+          // 床の暗いグラデーションと、雫の影
+          const sh = Math.max(0, Math.min(1, (f - 0.25) * 1.2));
+          const base = 8 + 10 * (y / S);
+          out[o] = base * (1 - sh * 0.7); out[o + 1] = base * (1 - sh * 0.7); out[o + 2] = (base + 6) * (1 - sh * 0.7); out[o + 3] = 255;
+          continue;
+        }
+        // 法線: 場の傾きから(ふちほど横向き)
+        const gx = field[p + 1] - field[p - 1 < 0 ? 0 : p - 1], gy = field[p + Wd] - field[p - Wd < 0 ? 0 : p - Wd];
+        let nx = -gx * 1.6, ny = -gy * 1.6; const l2 = nx * nx + ny * ny;
+        const edge = Math.min(1, l2); const nz = Math.sqrt(Math.max(0.02, 1 - edge));
+        const ln = Math.sqrt(l2) || 1; nx = nx / ln * Math.sqrt(edge); ny = ny / ln * Math.sqrt(edge);
+        let [r, g, b] = env(nx, ny, nz, t);
+        // ふちのハイライト(鋭い白)
+        const spec = Math.pow(Math.max(0, -nx * 0.45 - ny * 0.6 + nz * 0.66), 40) * 255;
+        out[o] = r + spec; out[o + 1] = g + spec; out[o + 2] = b + spec; out[o + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  return {
+    about: "<b>鏡の雫 NullDrop</b><br>液体金属のような鏡の雫が、まわりの景色(上は空、まん中は窓の光、下は暗い床)を映しながら、ゆっくりさまよい、くっついたり離れたりします。<br><b>触ると</b>:ドラッグで、いちばん近い雫を引っぱれます。タップすると小さな雫が生まれ、大きな雫に吸いこまれていきます。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// 揺れる鏡のタイル NullTiles
+//   外壁のような、小さな鏡のタイルの面。タイルの傾きが風の波でうねり、空と太陽を映してきらめく。
+//   触ると、その場所からタイルの揺れが波紋のように広がる。
+// =====================================================================
+const Tiles = (() => {
+  const N = 26, T = S / N;                         // タイルの数(1辺)と大きさ
+  const ax = new Float32Array(N * N), ay = new Float32Array(N * N), vx = new Float32Array(N * N), vy = new Float32Array(N * N);
+  let ripples = [], gustT = 0;
+  // 空(反射の向き → 色): 上ほど濃い青、地平の近くは明るく、太陽の所は白く光る
+  const cl = valueNoise(32, 77);
+  function sky(rx, ry) {
+    const h = Math.max(0, Math.min(1, (ry + 0.8) / 1.3));          // 0: 天頂 → 1: 地平
+    let r = 25 + 210 * h * h, g = 60 + 170 * h, b = 150 + 90 * h;
+    const n = sampleNoise(cl, 32, rx * 5 + 3, ry * 9 + 3);
+    const c = Math.max(0, n - 0.55) * 2.6 * (1 - h * 0.5);
+    r += (245 - r) * c; g += (245 - g) * c; b += (250 - b) * c;
+    const d = Math.hypot(rx - 0.3, ry + 0.3);
+    const sun = Math.max(0, 1 - d / 0.1), glow = Math.exp(-d / 0.18);
+    r += 255 * sun + 120 * glow; g += 245 * sun + 100 * glow; b += 220 * sun + 60 * glow;
+    return [Math.min(255, r), Math.min(255, g), Math.min(255, b)];
+  }
+  function step(dt, t) {
+    if (ptr.tapped) { ptr.tapped = false; ripples.push({ x: ptr.x, y: ptr.y, t: 0 }); }
+    if (ptr.down && rnd() < dt * 8) ripples.push({ x: ptr.x, y: ptr.y, t: 0, small: true });
+    gustT -= dt;
+    if (gustT < 0) { gustT = 3 + rnd() * 4; ripples.push({ x: rnd() < 0.5 ? -40 : S + 40, y: rnd() * S, t: 0, gust: true }); }
+    for (const r of ripples) r.t += dt;
+    ripples = ripples.filter(r => r.t < (r.gust ? 5 : 3));
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const p = j * N + i, x = (i + 0.5) * T, y = (j + 0.5) * T;
+      // いつもの風: ゆっくり流れる波
+      let tx = 0.12 * Math.sin(x * 0.018 + t * 0.9) * Math.cos(y * 0.011 - t * 0.5);
+      let ty = 0.12 * Math.sin(y * 0.016 - t * 0.7 + x * 0.004);
+      // 波紋: 輪の通るところで、外向きに傾く
+      for (const r of ripples) {
+        const dx = x - r.x, dy = y - r.y, d = Math.hypot(dx, dy) + 1e-3, sp = r.gust ? 140 : 230;
+        const ring = d - r.t * sp, w = r.gust ? 70 : 26;
+        const a = Math.exp(-ring * ring / (w * w)) * (r.small ? 0.25 : r.gust ? 0.35 : 0.55) * Math.exp(-r.t * (r.gust ? 0.4 : 1.1));
+        tx += dx / d * a; ty += dy / d * a;
+      }
+      // ばね(タイルの重さで、少し遅れて揺れる)
+      vx[p] = (vx[p] + (tx - ax[p]) * 60 * dt) * Math.exp(-dt * 6); vy[p] = (vy[p] + (ty - ay[p]) * 60 * dt) * Math.exp(-dt * 6);
+      ax[p] += vx[p] * dt; ay[p] += vy[p] * dt;
+    }
+  }
+  function draw(t) {
+    ctx.fillStyle = "#06070a"; ctx.fillRect(0, 0, S, S);
+    const gap = Math.max(1, T * 0.08);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const p = j * N + i, x = i * T, y = j * T;
+      // タイルの法線 → 反射の向き(少し下から見上げている)
+      const rx = ax[p] * 3 + (x - C) / S * 1.3, ry = ay[p] * 3 + (y - C) / S * 1.4 - 0.15;
+      const [r, g, b] = sky(rx, ry);
+      // タイルの中は、端に向かって少し暗く(面の丸み)
+      const grd = ctx.createLinearGradient(x, y, x + T, y + T);
+      grd.addColorStop(0, `rgb(${r | 0},${g | 0},${b | 0})`);
+      grd.addColorStop(1, `rgb(${r * 0.72 | 0},${g * 0.74 | 0},${b * 0.8 | 0})`);
+      ctx.fillStyle = grd;
+      ctx.fillRect(x + gap / 2, y + gap / 2, T - gap, T - gap);
+    }
+  }
+  return {
+    about: "<b>揺れる鏡のタイル NullTiles</b><br>外壁のように並んだ、小さな鏡のタイルの面です。タイルの傾きが風の波でゆっくりうねり、青空と太陽を映してきらめきます。ときどき、横から風の大きな波が通りすぎます。<br><b>触ると</b>:タップした所から、タイルの揺れが波紋のように広がります。押したままにすると、小さな波紋が続けて生まれます。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// 計算機の枯山水 NullZen
+//   白砂に、石のまわりは同心円、それ以外はまっすぐの砂紋。砂紋の溝には、光と影がつく。
+//   タップすると石が置かれ、熊手が横切りながら砂紋を引き直す。石はドラッグで動かせる。木漏れ日の影がゆっくり揺れる。
+// =====================================================================
+const Zen = (() => {
+  const SP = 12, RINGS = 4;                        // 砂紋の間隔(ピクセル)/ 石のまわりの輪の数
+  let stones = [], oldStones = [], sweep = S + 1, dirty = true, grabbed = -1;
+  const mk = (x, y, r) => ({ x, y, r, ph: rnd() * 6.283, sq: 0.8 + rnd() * 0.3 });
+  stones.push(mk(C - 70, C - 30, 34), mk(C + 80, C + 40, 26), mk(C + 10, C + 110, 18));
+  oldStones = stones.map(s => ({ ...s }));
+  const cache = document.createElement("canvas"); cache.width = cache.height = S;
+  const cc = cache.getContext("2d"), img = cc.createImageData(S, S), out = img.data;
+  const grain = new Uint8Array(S * S); for (let i = 0; i < S * S; i++) grain[i] = rnd() * 255;
+  const smooth = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // 砂紋の「位相」: 石のまわり(輪 RINGS 本ぶん)は石からの距離、その外はまっすぐ。石どうしの間は、なめらかな最小値でつなぐ
+  function phase(x, y, st) {
+    let sum = 0, best = 1e9;
+    for (const s of st) {
+      const dx = (x - s.x), dy = (y - s.y) / s.sq, d = Math.hypot(dx, dy) - s.r;
+      best = Math.min(best, d); sum += Math.exp(-d / 14);
+    }
+    const d = sum > 0 ? -14 * Math.log(sum) : 1e9;
+    const ring = d / SP, lin = (y + 7 * Math.sin(x * 0.011)) / SP;
+    const w = smooth(RINGS * SP - SP * 0.5, RINGS * SP + SP * 1.5, d);
+    return { p: ring * (1 - w) + lin * w, inStone: best < 0, d: best, w };
+  }
+  function renderSand(x0, x1, st) {
+    for (let y = 0; y < S; y++) for (let x = x0; x < x1; x++) {
+      const o = (y * S + x) * 4;
+      if (!inside[y * S + x]) { out[o] = out[o + 1] = out[o + 2] = 0; out[o + 3] = 255; continue; }
+      const a = phase(x, y, st);
+      if (a.inStone) {                               // 石: 暗い灰色、上が少し明るく、ふちに苔
+        let sn = null; for (const s of st) { const dx = x - s.x, dy = (y - s.y) / s.sq; if (Math.hypot(dx, dy) < s.r) { sn = s; break; } }
+        const ny = sn ? (y - sn.y) / (sn.r * sn.sq) : 0, nx = sn ? (x - sn.x) / sn.r : 0;
+        const l = 0.55 - 0.35 * ny - 0.2 * nx + (grain[y * S + x] / 255 - 0.5) * 0.15;
+        const rim = Math.max(0, -a.d < 3 ? 1 - (-a.d) / 3 : 0);
+        out[o] = 60 * l + 30 + rim * 10; out[o + 1] = 60 * l + 32 + rim * 30; out[o + 2] = 58 * l + 30; out[o + 3] = 255; continue;
+      }
+      // 溝: 位相の小数部 → 断面(山と谷)。山の左上が明るく、谷の底が少し暗い
+      const f = a.p - Math.floor(a.p);
+      const amp = 1 - 0.85 * 4 * a.w * (1 - a.w);          // 輪とまっすぐの境目は、溝をうすく(細かいしまが出ないように)
+      const v0 = 0.86 + (0.09 * Math.cos(f * 6.283) + 0.04 * Math.sin(f * 6.283)) * amp;
+      const g = (grain[y * S + x] / 255 - 0.5) * 0.07;
+      const sh = a.d < 10 ? (10 - a.d) / 10 * 0.18 : 0;   // 石のすぐまわりは、少し影になる
+      const v = Math.max(0, v0 + g - sh);
+      out[o] = 228 * v; out[o + 1] = 222 * v; out[o + 2] = 205 * v; out[o + 3] = 255;
+    }
+  }
+  function step(dt, t) {
+    // 指: 石の上ならつかむ、砂の上をタップなら石を置く
+    if (ptr.tapped) {
+      ptr.tapped = false; grabbed = -1;
+      stones.forEach((s, i) => { if (Math.hypot(ptr.x - s.x, (ptr.y - s.y) / s.sq) < s.r + 6) grabbed = i; });
+      if (grabbed < 0 && Math.hypot(ptr.x - C, ptr.y - C) < R - 30) {
+        oldStones = stones.map(s => ({ ...s }));
+        stones.push(mk(ptr.x, ptr.y, 14 + rnd() * 20));
+        if (stones.length > 5) stones.shift();
+        sweep = 0; dirty = true;
+      }
+    }
+    if (ptr.down && grabbed >= 0) {
+      const s = stones[grabbed];
+      if (Math.hypot(ptr.x - s.x, ptr.y - s.y) > 2) { if (sweep > S) oldStones = stones.map(q => ({ ...q })); s.x = ptr.x; s.y = ptr.y; dirty = true; }
+    }
+    if (!ptr.down && grabbed >= 0) { grabbed = -1; sweep = 0; }
+    // 熊手: 左から右へ横切りながら、新しい砂紋を引く
+    if (sweep <= S) { const nx = Math.min(S + 1, sweep + dt * 260); renderSand(Math.floor(sweep), Math.min(S, Math.floor(nx)), stones); cc.putImageData(img, 0, 0); sweep = nx; if (sweep > S) oldStones = stones.map(s => ({ ...s })); }
+    if (dirty && sweep > S && grabbed < 0) { renderSand(0, S, stones); cc.putImageData(img, 0, 0); dirty = false; }
+    if (dirty && grabbed >= 0) { renderSand(0, S, stones); cc.putImageData(img, 0, 0); }
+  }
+  // 起動時に一度、全部引いておく
+  renderSand(0, S, stones); cc.putImageData(img, 0, 0); dirty = false;
+  function draw(t) {
+    ctx.drawImage(cache, 0, 0);
+    // 熊手
+    if (sweep <= S) {
+      ctx.fillStyle = "rgba(90,60,35,.9)"; ctx.fillRect(sweep - 3, 0, 5, S);
+      ctx.fillStyle = "rgba(255,250,235,.25)"; ctx.fillRect(sweep + 2, 0, 10, S);
+    }
+    // 木漏れ日の影(ゆっくり揺れる)
+    ctx.globalCompositeOperation = "multiply";
+    for (let i = 0; i < 9; i++) {
+      const x = C + Math.sin(t * 0.05 + i * 2.1) * R * 0.9 + Math.sin(t * 0.37 + i) * 8, y = C + Math.cos(t * 0.04 + i * 1.3) * R * 0.9;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 70 + 20 * Math.sin(i));
+      g.addColorStop(0, "rgba(150,150,165,.55)"); g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g; ctx.fillRect(x - 100, y - 100, 200, 200);
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+  return {
+    about: "<b>計算機の枯山水 NullZen</b><br>白砂に、石のまわりは同心円、それ以外はまっすぐの砂紋が引かれています。砂紋の溝には光と影がつき、木漏れ日の影がゆっくり揺れます。<br><b>触ると</b>:砂の上をタップすると石が置かれ(最大5つ。古いものから消える)、熊手が左から右へ横切りながら砂紋を引き直します。石はドラッグで動かせて、離すとまた引き直されます。",
+    step, draw,
+  };
+})();
+
+// =====================================================================
+// 焦点の光 NullBokeh
+//   夜の街の光が、六角形の玉ボケになって浮かぶ。ピントがゆっくり前後に呼吸し、光の玉がほどけたり、点に締まったりする。
+//   タップした光にピントが合う。上下にドラッグすると、手でピントを送れる。
+// =====================================================================
+const Bokeh = (() => {
+  const N = 150, L = [];
+  const warm = [[255, 190, 110], [255, 150, 80], [255, 230, 170], [255, 120, 120]], cool = [[150, 200, 255], [190, 230, 255], [120, 255, 210]];
+  for (let i = 0; i < N; i++) {
+    const z = rnd(), c = rnd() < 0.7 ? warm[rnd() * warm.length | 0] : cool[rnd() * cool.length | 0];
+    L.push({ x: rnd() * S, y: S * (0.25 + 0.6 * rnd()), z, c, b: 0.5 + rnd() * 0.5, v: rnd() < 0.18 ? (rnd() < 0.5 ? -1 : 1) * (20 + rnd() * 50) : 0, tw: rnd() * 6.283 });
+  }
+  let focus = 0.5, target = 0.5, manual = 0, lastY = 0, dragging = false;
+  const hex = document.createElement("canvas"); hex.width = hex.height = 128;
+  { const h = hex.getContext("2d"); h.translate(64, 64);
+    const path = r => { h.beginPath(); for (let k = 0; k < 6; k++) { const a = k / 6 * 6.283 + 0.26; const px = Math.cos(a) * r, py = Math.sin(a) * r; k ? h.lineTo(px, py) : h.moveTo(px, py); } h.closePath(); };
+    const g = h.createRadialGradient(0, 0, 0, 0, 0, 62); g.addColorStop(0, "rgba(255,255,255,.55)"); g.addColorStop(0.8, "rgba(255,255,255,.7)"); g.addColorStop(0.95, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,.6)");
+    path(62); h.fillStyle = g; h.fill(); }
+  const tint = document.createElement("canvas"); tint.width = tint.height = 128; const tg = tint.getContext("2d");
+  function step(dt, t) {
+    if (ptr.tapped) {
+      ptr.tapped = false; dragging = false; lastY = ptr.y;
+      let best = 1e9, bz = target;
+      for (const l of L) { const d = Math.hypot(l.x - ptr.x, l.y - ptr.y); if (d < best) { best = d; bz = l.z; } }
+      target = bz; manual = 6;                       // 6 秒は、そのピントのまま
+    }
+    if (ptr.down) {
+      if (Math.abs(ptr.y - lastY) > 4 || dragging) { dragging = true; target = Math.max(0, Math.min(1, target + (lastY - ptr.y) / S * 1.5)); manual = 6; }
+      lastY = ptr.y;
+    } else dragging = false;
+    manual -= dt;
+    if (manual < 0) target = 0.5 + 0.45 * Math.sin(t * 0.22);   // ピントの呼吸
+    focus += (target - focus) * (1 - Math.exp(-dt * 3));
+    for (const l of L) { l.x += l.v * dt * (0.4 + l.z); if (l.x < -60) l.x = S + 60; if (l.x > S + 60) l.x = -60; }
+  }
+  function draw(t) {
+    const g = ctx.createLinearGradient(0, 0, 0, S);
+    g.addColorStop(0, "#04040a"); g.addColorStop(0.6, "#0b0a14"); g.addColorStop(1, "#140e10");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, S, S);
+    ctx.globalCompositeOperation = "lighter";
+    const sorted = L.slice().sort((a, b) => Math.abs(b.z - focus) - Math.abs(a.z - focus));
+    for (const l of sorted) {
+      const blur = Math.abs(l.z - focus), r = 2 + blur * 46 * (0.6 + l.z * 0.6);
+      // 面積が大きいほど、うすく(光の量は同じ)
+      const a = Math.min(1, l.b * (0.9 + 0.1 * Math.sin(t * 2 + l.tw)) * Math.pow(3 / r, 1.25) * 3.2);
+      if (a < 0.01) continue;
+      const [cr, cg, cb] = l.c;
+      if (r < 4) {                                   // ピントが合った光: 小さく鋭い点
+        const p = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, 6);
+        p.addColorStop(0, `rgba(255,255,255,${Math.min(1, l.b)})`); p.addColorStop(0.3, `rgba(${cr},${cg},${cb},${l.b * 0.8})`); p.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+        ctx.fillStyle = p; ctx.fillRect(l.x - 6, l.y - 6, 12, 12);
+        continue;
+      }
+      tg.globalCompositeOperation = "source-over"; tg.clearRect(0, 0, 128, 128); tg.drawImage(hex, 0, 0);
+      tg.globalCompositeOperation = "source-in"; tg.fillStyle = `rgb(${cr},${cg},${cb})`; tg.fillRect(0, 0, 128, 128);
+      ctx.globalAlpha = a; ctx.drawImage(tint, l.x - r, l.y - r, r * 2, r * 2);
+    }
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    // ピントの目盛り(下に小さく)
+    ctx.fillStyle = "rgba(255,255,255,.25)"; ctx.fillRect(C - 60, S - 40, 120, 1);
+    ctx.fillStyle = "rgba(255,220,160,.8)"; ctx.fillRect(C - 60 + focus * 120 - 1, S - 45, 2, 10);
+  }
+  return {
+    about: "<b>焦点の光 NullBokeh</b><br>夜の街の光が、六角形の玉ボケ(レンズの絞りの形)になって浮かびます。ピントがゆっくり前後に呼吸し、手前や奥の光の玉がほどけたり、点に締まったりします。ボケが大きいほど、光はうすく広がります。下の小さな目盛りが、今のピントの位置です。<br><b>触ると</b>:タップした光にピントが合います。上下にドラッグすると、手でピントを送れます(しばらくすると、また呼吸に戻ります)。",
+    step, draw,
+  };
+})();
+
+// ---- 切り替えと動かす
+const pieces = { A: Float, B: Pond, C: Plasma, D: Kintsugi, E: Infinity_, F: Twin, G: Drop, H: Tiles, I: Zen, J: Bokeh };
+const tabs = document.querySelectorAll(".tabs button[data-k]");
+let cur = "A";
+function select(k) {
+  cur = k;
+  tabs.forEach(b => b.setAttribute("aria-pressed", b.dataset.k === k));
+  aboutEl.innerHTML = pieces[k].about;
+  ptr.tapped = false;
+  ctx.clearRect(0, 0, S, S);
+}
+tabs.forEach(b => b.onclick = () => select(b.dataset.k));
+select("A");
+
+let last = performance.now(), t = 0, frames = 0, fpsT = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+  const p = pieces[cur];
+  p.step(dt, t); p.draw(t);
+  // 丸い画面の外は黒
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.fillStyle = "#000";
+  ctx.beginPath(); ctx.arc(C + 0.5, C + 0.5, R, 0, Math.PI * 2); ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+  frames++; fpsT += dt;
+  if (fpsT > 1) { fpsEl.textContent = (frames / fpsT).toFixed(0) + " fps"; frames = 0; fpsT = 0; }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
