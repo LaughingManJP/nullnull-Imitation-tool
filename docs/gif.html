@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NullGif Sender</title>
+<meta name="description" content="M5Stack StopWatch / CoreS3 の NullGif に、PC の Chrome / Edge から USB で GIF を送るページ">
+<style>
+:root {
+  --bg: #0b0d12;
+  --panel: #13161e;
+  --line: #262b37;
+  --fg: #e6e8ee;
+  --muted: #8a91a3;
+  --accent: #7fd4c1;
+  --warn: #f0b45a;
+  --bad: #f07a6a;
+  --key: #1c2029;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { min-height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.65; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 22px 16px 40px; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+h1 { font-size: 22px; font-weight: 700; letter-spacing: .02em; margin: 0; }
+.sub { color: var(--muted); font-size: 13px; }
+section.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.box h2 { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--muted); margin: 0; text-transform: uppercase; }
+ol.steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; }
+ol.steps b { font-weight: 600; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn { appearance: none; background: var(--key); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: 600 14px var(--body); cursor: pointer; }
+.btn.primary { background: var(--accent); color: #062019; border-color: var(--accent); }
+.btn.small { padding: 4px 10px; font-size: 12.5px; font-weight: 500; }
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.on { background: var(--accent); box-shadow: 0 0 10px rgba(127,212,193,.6); }
+.dot.wait { background: var(--warn); }
+.dot.bad { background: var(--bad); }
+.cap { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 10px; border-radius: 6px; background: #0a0c10; border: 1px solid var(--line); overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #5fbfa9, var(--accent)); transition: width .3s; }
+.capnum { font: 13px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.capnum b { color: var(--fg); font-weight: 600; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 26px 14px; text-align: center; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: rgba(127,212,193,.06); color: var(--fg); }
+.drop[aria-disabled="true"] { opacity: .5; cursor: default; }
+.drop b { color: var(--fg); }
+ul.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+ul.files li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+ul.files li:first-child { border-top: 0; }
+.fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px var(--mono); }
+.fsize { color: var(--muted); font: 12px var(--mono); font-variant-numeric: tabular-nums; flex: none; }
+.empty { color: var(--muted); font-size: 13px; }
+.jobs { display: flex; flex-direction: column; gap: 8px; }
+.job { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.job .bar { height: 6px; }
+.job.err { color: var(--bad); }
+.job.ok { color: var(--accent); }
+.note { color: var(--muted); font-size: 12.5px; margin: 0; }
+.alert { border: 1px solid #5a3a2a; background: #1f1510; color: #f3c9a8; border-radius: 10px; padding: 12px 14px; font-size: 13.5px; }
+.log { font: 11.5px/1.5 var(--mono); color: #b5bccb; background: #0a0c10; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>NullGif に GIF を送る</h1>
+    <span class="sub">PC の Chrome / Edge から、USB ケーブルで StopWatch へ</span>
+  </header>
+
+  <div class="alert" id="noSerial" hidden>このブラウザは USB の機器とつなぐ機能(Web Serial)に対応していません。PC の <b>Chrome</b> か <b>Edge</b> で開いてください。</div>
+
+  <section class="box">
+    <h2>つなぎ方</h2>
+    <ol class="steps">
+      <li>本体のメニューで <b>NullGif</b> を選んで動かす</li>
+      <li>USB ケーブルで PC につなぐ(Arduino IDE のシリアルモニタは閉じておく)</li>
+      <li>下の <b>本体につなぐ</b> を押して、出てきた一覧から本体を選ぶ</li>
+    </ol>
+    <p class="note">つなぐたびに本体がメニューに戻ってしまうときは、NullMenu ではなく <b>NullGif_v1</b> を単体で書き込んでから送ってください(戻っても NullGif のままなので送れます)。</p>
+    <div class="row">
+      <button class="btn primary" id="connect">本体につなぐ</button>
+      <button class="btn" id="disconnect" hidden>切る</button>
+      <div class="status"><span class="dot" id="dot"></span><span id="status">つながっていません</span></div>
+    </div>
+  </section>
+
+  <section class="box">
+    <h2>本体の容量</h2>
+    <div class="cap">
+      <div class="bar" aria-hidden="true"><i id="capBar"></i></div>
+      <div class="capnum" id="capText">—</div>
+    </div>
+  </section>
+
+  <section class="box">
+    <h2>GIF を送る</h2>
+    <div class="drop" id="drop" role="button" tabindex="0" aria-disabled="true">
+      ここに <b>GIF を落とす</b>(またはクリックして選ぶ)<br><span class="note">いくつでもまとめて送れます。同じ名前の GIF は上書きします</span>
+    </div>
+    <input type="file" id="pick" accept="image/gif,.gif" multiple hidden>
+    <div class="jobs" id="jobs"></div>
+    <p class="note">名前は英数字と . _ - にそろえて送ります(日本語の名前は送った日時の名前になります)。丸い画面なので、四角い GIF の四隅は切れます。466×466 くらいの大きさにしておくと、きれいで速く動きます。</p>
+  </section>
+
+  <section class="box">
+    <h2>本体の GIF</h2>
+    <ul class="files" id="files"><li class="empty">つなぐと、ここに一覧が出ます</li></ul>
+  </section>
+
+  <details>
+    <summary>やりとりの記録</summary>
+    <div class="log" id="log"></div>
+  </details>
+</main>
+
+<script id="nmg-client">
+// ---- 本体との約束ごと(USB シリアル)。ブラウザでも Node のテストでも同じものを使う
+// 行: 「NMG …」で始まる1行。GIF のデータは PUT のあと、2KB ずつ送って ACK を待つ
+const NMG_ERRORS = {
+  FULL: '容量が足りません', NAME: 'この名前は使えません', MANY: 'GIF が多すぎます(64 個まで)',
+  NOFS: '本体に GIF の置き場がありません(Partition Scheme を「16M Flash (3MB APP/9.9MB FATFS)」にして書き込んでください)',
+  CRC: '送るとちゅうでデータが化けました。もう一度送ってください', TIMEOUT: '本体からの返事が途中で止まりました',
+  OPEN: '本体に書き込めませんでした', SAVE: '本体に書き込めませんでした', NOFILE: 'その GIF は本体にありません',
+  STATE: '本体とのやりとりが食い違いました', CMD: '本体がこの命令を知りません(NullGif を新しくしてください)',
+};
+function nmgCrc32(bytes) {
+  let c = ~0 >>> 0;
+  for (let i = 0; i < bytes.length; ++i) { c ^= bytes[i]; for (let k = 0; k < 8; ++k) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); }
+  return (~c) >>> 0;
+}
+// ファイル名を、本体で使える名前(英数字と . _ - 、40 文字まで、.gif で終わる)にする
+function nmgSafeName(name, now = new Date()) {
+  let base = String(name).replace(/\.[^.]*$/, '');
+  base = base.replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^[._~]+/, '');
+  if ((base.match(/[A-Za-z0-9]/g) || []).length < 2) {        // 英数字がほとんど残らない(日本語の名前など)ときは、日時の名前に
+    const p = (n) => String(n).padStart(2, '0');
+    base = `gif_${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  }
+  return base.slice(0, 36) + '.gif';
+}
+class NmgError extends Error { constructor(code) { super(NMG_ERRORS[code] || ('本体のエラー: ' + code)); this.code = code; } }
+class NmgClient {
+  constructor(send) {               // send(Uint8Array) → Promise
+    this.send = send; this.text = ''; this.waiters = []; this.onLine = null; this.chain = Promise.resolve();
+  }
+  onBytes(u8) {                     // 本体から届いたバイト
+    this.text += new TextDecoder('latin1').decode(u8);
+    let k;
+    while ((k = this.text.indexOf('\n')) >= 0) {
+      const line = this.text.slice(0, k).replace(/\r$/, ''); this.text = this.text.slice(k + 1);
+      if (this.onLine) this.onLine(line);
+      if (!line.startsWith('NMG ')) continue;
+      const w = this.waiters.find((w) => w.pred(line));
+      if (w) { this.waiters.splice(this.waiters.indexOf(w), 1); clearTimeout(w.t); w.ok(line); }
+    }
+  }
+  waitFor(pred, ms) {
+    return new Promise((ok, ng) => {
+      const w = { pred, ok, t: setTimeout(() => { this.waiters.splice(this.waiters.indexOf(w), 1); ng(new NmgError('TIMEOUT')); }, ms) };
+      this.waiters.push(w);
+    });
+  }
+  sendLine(s) { return this.send(new TextEncoder().encode(s + '\n')); }
+  exclusive(fn) {                   // 1つずつ順番に(データを送っている途中に別の命令を混ぜない)
+    const run = this.chain.then(fn, fn); this.chain = run.catch(() => {}); return run;
+  }
+  static check(line) { if (line.startsWith('NMG ERR')) throw new NmgError(line.split(' ')[2] || '?'); return line; }
+  hello(ms = 1500) {
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => l.startsWith('NMG HELLO') || l.startsWith('NMG ERR'), ms);
+      await this.sendLine('NMG HELLO');
+      const a = NmgClient.check(await p).split(' ');
+      return { proto: +a[2], total: +a[3], used: +a[4], count: +a[5], fs: a[6] === '1' };
+    });
+  }
+  list() {
+    return this.exclusive(async () => {
+      const files = [];
+      const p = this.waitFor((l) => { if (l.startsWith('NMG FILE ')) { const m = l.match(/^NMG FILE (\d+) (.+)$/); if (m) files.push({ size: +m[1], name: m[2] }); return false; } return l.startsWith('NMG END') || l.startsWith('NMG ERR'); }, 3000);
+      await this.sendLine('NMG LIST');
+      NmgClient.check(await p);
+      return files;
+    });
+  }
+  okReply(line) { const a = NmgClient.check(line).split(' '); return { total: +a[2], used: +a[3] }; }
+  del(name) {
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => /^NMG (OK|ERR)/.test(l), 5000);
+      await this.sendLine('NMG DEL ' + name);
+      return this.okReply(await p);
+    });
+  }
+  play(name) {
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => /^NMG (OK|ERR)/.test(l), 5000);
+      await this.sendLine('NMG PLAY ' + name);
+      return this.okReply(await p);
+    });
+  }
+  put(name, bytes, onProgress) {   // bytes: Uint8Array
+    return this.exclusive(async () => {
+      const r = this.waitFor((l) => /^NMG (READY|ERR)/.test(l), 5000);
+      await this.sendLine(`NMG PUT ${bytes.length} ${name}`);
+      const chunk = +NmgClient.check(await r).split(' ')[2] || 2048;
+      let off = 0;
+      while (off < bytes.length) {
+        const n = Math.min(chunk, bytes.length - off);
+        const want = `NMG ACK ${off + n}`;
+        const a = this.waitFor((l) => l === want || l.startsWith('NMG ERR'), 10000);
+        await this.send(bytes.subarray(off, off + n));
+        NmgClient.check(await a);
+        off += n;
+        if (onProgress) onProgress(off / bytes.length);
+      }
+      const d = this.waitFor((l) => /^NMG (OK|ERR)/.test(l), 15000);
+      await this.sendLine('NMG DONE ' + nmgCrc32(bytes).toString(16));
+      return this.okReply(await d);
+    });
+  }
+}
+if (typeof module !== 'undefined') module.exports = { NmgClient, NmgError, nmgCrc32, nmgSafeName };
+</script>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+  const log = (s) => { logEl.textContent += s + '\n'; if (logEl.textContent.length > 20000) logEl.textContent = logEl.textContent.slice(-15000); logEl.scrollTop = logEl.scrollHeight; };
+  const mb = (n) => (n / 1048576).toFixed(1) + 'MB';
+  const kb = (n) => n >= 1048576 ? mb(n) : Math.max(1, Math.round(n / 1024)) + 'KB';
+
+  if (!('serial' in navigator)) { $('noSerial').hidden = false; $('connect').disabled = true; }
+
+  let port = null, reader = null, writer = null, client = null, ready = false, info = null, helloTimer = null, wantPort = null;
+
+  function setStatus(kind, text) { $('dot').className = 'dot ' + (kind || ''); $('status').textContent = text; }
+  function setReady(v) {
+    ready = v;
+    $('drop').setAttribute('aria-disabled', v ? 'false' : 'true');
+  }
+  function showCap() {
+    if (!info) { $('capBar').style.width = '0'; $('capText').textContent = '—'; return; }
+    const free = Math.max(0, info.total - info.used);
+    $('capBar').style.width = (info.total ? Math.min(100, info.used / info.total * 100) : 0).toFixed(1) + '%';
+    $('capText').innerHTML = `残り <b>${mb(free)}</b> / 全体 ${mb(info.total)}(使用 ${mb(info.used)}・GIF ${info.count} 個)`;
+  }
+  function showFiles(files) {
+    const ul = $('files'); ul.textContent = '';
+    if (!files.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'まだ GIF がありません'; ul.append(li); return; }
+    for (const f of files) {
+      const li = document.createElement('li');
+      const n = document.createElement('span'); n.className = 'fname'; n.textContent = f.name; n.title = f.name;
+      const s = document.createElement('span'); s.className = 'fsize'; s.textContent = kb(f.size);
+      const p = document.createElement('button'); p.className = 'btn small'; p.textContent = '流す';
+      p.onclick = async () => { try { await client.play(f.name); } catch (e) { alert(e.message); } };
+      const d = document.createElement('button'); d.className = 'btn small'; d.textContent = '消す';
+      d.onclick = async () => {
+        if (!confirm(`「${f.name}」を本体から消しますか?`)) return;
+        try { const r = await client.del(f.name); await refresh(r); } catch (e) { alert(e.message); }
+      };
+      li.append(n, s, p, d); ul.append(li);
+    }
+  }
+  async function refresh() {
+    info = await client.hello();
+    showCap();
+    showFiles(await client.list());
+  }
+
+  // ---- つなぐ
+  async function openPort(p) {
+    port = p;
+    await port.open({ baudRate: 115200, bufferSize: 16384 });
+    // 本体を再起動させる信号の組み合わせ(RTS だけが入る)にならないように、RTS は切っておく
+    try { await port.setSignals({ dataTerminalReady: true, requestToSend: false }); } catch (e) {}
+    writer = port.writable.getWriter();
+    client = new NmgClient((u8) => writer.write(u8));
+    client.onLine = (l) => log(l);
+    $('connect').hidden = true; $('disconnect').hidden = false;
+    readLoop();
+    waitHello();
+  }
+  async function readLoop() {
+    try {
+      reader = port.readable.getReader();
+      for (;;) { const { value, done } = await reader.read(); if (done) break; if (value) client.onBytes(value); }
+    } catch (e) { log('# read: ' + e.message); }
+    finally { try { reader.releaseLock(); } catch (e) {} }
+  }
+  // 本体が NullGif を動かしていないと返事がないので、返事が来るまで聞き続ける
+  function waitHello() {
+    clearTimeout(helloTimer);
+    setReady(false);
+    setStatus('wait', '本体の返事を待っています… 本体のメニューで NullGif を選んでください');
+    const tryOnce = async () => {
+      if (!client) return;
+      try {
+        info = await client.hello();
+        if (!info.fs) { setStatus('bad', 'つながりました。でも本体に GIF の置き場がありません'); $('capText').textContent = NMG_ERRORS.NOFS; return; }
+        setStatus('on', 'つながりました');
+        setReady(true);
+        await refresh();
+      } catch (e) { helloTimer = setTimeout(tryOnce, 1500); }
+    };
+    tryOnce();
+  }
+  async function closePort() {
+    clearTimeout(helloTimer);
+    setReady(false); info = null; showCap();
+    try { if (reader) await reader.cancel(); } catch (e) {}
+    try { if (writer) { writer.releaseLock(); } } catch (e) {}
+    try { if (port) await port.close(); } catch (e) {}
+    port = reader = writer = client = null;
+    $('connect').hidden = false; $('disconnect').hidden = true;
+    setStatus('', 'つながっていません');
+  }
+  $('connect').onclick = async () => {
+    try { const p = await navigator.serial.requestPort(); wantPort = p; await openPort(p); }
+    catch (e) { if (e.name !== 'NotFoundError') { setStatus('bad', 'つなげませんでした: ' + e.message); log('# ' + e.message); } }
+  };
+  $('disconnect').onclick = async () => { wantPort = null; await closePort(); };
+  if ('serial' in navigator) {
+    // 本体が再起動すると(メニューで作品を選んだとき)いったん切れるので、同じ本体がつながり直したら自動でつなぐ
+    navigator.serial.addEventListener('disconnect', async (e) => {
+      if (port && e.target === port) { log('# 本体が切れました'); const keep = wantPort; await closePort(); wantPort = keep; if (wantPort) setStatus('wait', '本体がつながり直すのを待っています…'); }
+    });
+    navigator.serial.addEventListener('connect', async (e) => {
+      if (!port && wantPort) { log('# 本体がつながり直しました'); try { await openPort(e.target); } catch (err) { log('# ' + err.message); } }
+    });
+  }
+
+  // ---- 送る
+  async function sendFiles(list) {
+    if (!ready) { alert('先に本体につないでください'); return; }
+    for (const file of list) {
+      const job = document.createElement('div'); job.className = 'job';
+      const t = document.createElement('div'); const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.append(fill);
+      job.append(t, bar); $('jobs').prepend(job);
+      const name = nmgSafeName(file.name);
+      const label = name === file.name ? name : `${file.name} → ${name}`;
+      t.textContent = label + '  準備中…';
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const sig = String.fromCharCode(...bytes.subarray(0, 6));
+        if (sig !== 'GIF87a' && sig !== 'GIF89a') throw new Error('GIF ではありません');
+        info = await client.hello();
+        const free = Math.max(0, info.total - info.used);
+        if (bytes.length + 32768 > free) throw new Error(`容量が足りません(${kb(bytes.length)} / 残り ${mb(free)})`);
+        const t0 = performance.now();
+        const r = await client.put(name, bytes, (k) => { fill.style.width = (k * 100).toFixed(1) + '%'; t.textContent = `${label}  ${Math.round(k * 100)}%`; });
+        const sec = (performance.now() - t0) / 1000;
+        t.textContent = `${label}  送りました(${kb(bytes.length)}・${sec.toFixed(1)} 秒)`; job.classList.add('ok');
+        await refresh(r);
+      } catch (e) {
+        t.textContent = `${label}  ${e.message}`; job.classList.add('err'); fill.style.width = '0';
+        if (e.code === 'TIMEOUT') waitHello();
+      }
+    }
+  }
+  const drop = $('drop');
+  drop.onclick = () => { if (ready) $('pick').click(); };
+  drop.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && ready) { e.preventDefault(); $('pick').click(); } };
+  $('pick').onchange = () => { sendFiles([...$('pick').files]); $('pick').value = ''; };
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); sendFiles([...e.dataTransfer.files]); });
+})();
+</script>
+</body>
+</html>
