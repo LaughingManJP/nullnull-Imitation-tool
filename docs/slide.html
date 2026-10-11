@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NullSlide Sender</title>
+<meta name="description" content="M5Stack StopWatch / CoreS3 の NullSlide に、PC の Chrome / Edge から USB で写真を送って、スライドショーの設定を変えるページ">
+<style>
+:root {
+  --bg: #0d0b10;
+  --panel: #17131b;
+  --line: #2c2532;
+  --fg: #eee8ee;
+  --muted: #998fa0;
+  --accent: #ff9ec4;
+  --accent-ink: #2a0f1b;
+  --warn: #f0b45a;
+  --bad: #f07a6a;
+  --key: #211b26;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { min-height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.65; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 22px 16px 40px; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+h1 { font-size: 22px; font-weight: 700; letter-spacing: .02em; margin: 0; }
+.sub { color: var(--muted); font-size: 13px; }
+section.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.box h2 { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--muted); margin: 0; text-transform: uppercase; }
+ol.steps { margin: 0; padding-left: 1.4em; display: flex; flex-direction: column; gap: 4px; }
+ol.steps b { font-weight: 600; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn { appearance: none; background: var(--key); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: 600 14px var(--body); cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.small { padding: 4px 10px; font-size: 12.5px; font-weight: 500; }
+.btn.danger { color: var(--bad); }
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { opacity: .45; cursor: default; filter: none; }
+.btn:focus-visible, .seg button:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { display: flex; align-items: center; gap: 8px; font-size: 13.5px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.on { background: var(--accent); box-shadow: 0 0 10px rgba(255,158,196,.6); }
+.dot.wait { background: var(--warn); }
+.dot.bad { background: var(--bad); }
+.cap { display: flex; flex-direction: column; gap: 6px; }
+.bar { height: 10px; border-radius: 6px; background: #0b090d; border: 1px solid var(--line); overflow: hidden; }
+.bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #d97aa2, var(--accent)); transition: width .3s; }
+.capnum { font: 13px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.capnum b { color: var(--fg); font-weight: 600; }
+/* 設定 */
+.settings { display: grid; grid-template-columns: max-content 1fr; gap: 10px 14px; align-items: center; }
+.settings .lab { color: var(--muted); font-size: 13px; }
+.seg { justify-self: start; max-width: 100%; display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: #0f0c12; }
+.seg button { appearance: none; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--fg); font: 500 13px var(--body); padding: 6px 12px; cursor: pointer; }
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.seg button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 520px) { .settings { grid-template-columns: 1fr; gap: 4px; } .settings .lab { margin-top: 6px; } }
+/* 送る */
+.fit { display: flex; gap: 10px; flex-wrap: wrap; }
+.fit label { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px 8px 8px; cursor: pointer; background: #0f0c12; }
+.fit input { position: absolute; opacity: 0; pointer-events: none; }
+.fit label:has(input:checked) { border-color: var(--accent); background: rgba(255,158,196,.07); }
+.fit label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fit svg { width: 44px; height: 44px; flex: none; }
+.fit b { display: block; font-size: 13.5px; }
+.fit span.note { display: block; }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 26px 14px; text-align: center; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: rgba(255,158,196,.06); color: var(--fg); }
+.drop[aria-disabled="true"] { opacity: .5; cursor: default; }
+.drop b { color: var(--fg); }
+ul.files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 420px; overflow: auto; }
+ul.files li { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); min-width: 0; }
+ul.files li:first-child { border-top: 0; }
+.fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 13px var(--mono); }
+.fsize { color: var(--muted); font: 12px var(--mono); font-variant-numeric: tabular-nums; flex: none; }
+.empty { color: var(--muted); font-size: 13px; }
+.jobs { display: flex; flex-direction: column; gap: 8px; }
+.job { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.job img { width: 40px; height: 40px; border-radius: 50%; flex: none; background: #000; object-fit: cover; }
+.job .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.job .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job .bar { height: 6px; }
+.job.err { color: var(--bad); }
+.job.ok { color: var(--accent); }
+.note { color: var(--muted); font-size: 12.5px; margin: 0; }
+.alert { border: 1px solid #5a3a2a; background: #1f1510; color: #f3c9a8; border-radius: 10px; padding: 12px 14px; font-size: 13.5px; }
+.log { font: 11.5px/1.5 var(--mono); color: #bdb3c4; background: #0b090d; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>NullSlide に写真を送る</h1>
+    <span class="sub">PC の Chrome / Edge から、USB ケーブルで StopWatch へ</span>
+  </header>
+  <p class="note">スマホからなら、本体の Wi-Fi で送るほうがかんたんです(本体のボタン B の設定 →「Wi-Fi で受け取る」)。</p>
+
+  <div class="alert" id="noSerial" hidden>このブラウザは USB の機器とつなぐ機能(Web Serial)に対応していません。PC の <b>Chrome</b> か <b>Edge</b> で開いてください。</div>
+
+  <section class="box">
+    <h2>つなぎ方</h2>
+    <ol class="steps">
+      <li>本体のメニューで <b>NullSlide</b> を選んで動かす</li>
+      <li>USB ケーブルで PC につなぐ(Arduino IDE のシリアルモニタは閉じておく)</li>
+      <li>下の <b>本体につなぐ</b> を押して、出てきた一覧から本体を選ぶ</li>
+    </ol>
+    <p class="note">つなぐたびに本体がメニューに戻ってしまうときは、NullMenu ではなく <b>NullSlide_v5</b> を単体で書き込んでから送ってください。</p>
+    <div class="row">
+      <button class="btn primary" id="connect">本体につなぐ</button>
+      <button class="btn" id="disconnect" hidden>切る</button>
+      <div class="status"><span class="dot" id="dot"></span><span id="status">つながっていません</span></div>
+    </div>
+  </section>
+
+  <section class="box">
+    <h2>本体の容量</h2>
+    <div class="cap">
+      <div class="bar" aria-hidden="true"><i id="capBar"></i></div>
+      <div class="capnum" id="capText">—</div>
+    </div>
+    <p class="note">写真は 400 枚まで入ります。ただし容量(約 9.7MB)は GIF と分け合うので、GIF が多いときや、写真が大きいときは、それより少なくなります。</p>
+  </section>
+
+  <section class="box">
+    <h2>スライドショーの設定</h2>
+    <div class="settings" id="settings"></div>
+    <p class="note">押すとすぐ本体に伝わって、本体にしまわれます。本体のボタン(B)で開く設定と同じものです。「形」は写真にかぶせる窓の形です(「そのまま」は画面いっぱいに見せる)。送った写真そのものは変わりません。</p>
+  </section>
+
+  <section class="box">
+    <h2>写真を送る</h2>
+    <div class="fit" role="radiogroup" aria-label="写真の収め方">
+      <label>
+        <input type="radio" name="fit" value="cover" checked>
+        <svg viewBox="0 0 44 44" aria-hidden="true"><defs><clipPath id="c1"><circle cx="22" cy="22" r="20"/></clipPath></defs><circle cx="22" cy="22" r="20" fill="#000"/><g clip-path="url(#c1)"><rect x="-6" y="2" width="56" height="40" fill="#6e5a7e"/><circle cx="22" cy="19" r="7" fill="#ffcf9e"/><rect x="8" y="27" width="28" height="16" rx="8" fill="#ff9ec4"/></g><circle cx="22" cy="22" r="20" fill="none" stroke="#5a4f62"/></svg>
+        <span><b>画面いっぱい</b><span class="note">はみ出す所は切る</span></span>
+      </label>
+      <label>
+        <input type="radio" name="fit" value="contain">
+        <svg viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="20" fill="#000"/><rect x="8" y="12.5" width="28" height="19" fill="#6e5a7e"/><circle cx="22" cy="19.5" r="4" fill="#ffcf9e"/><rect x="14" y="24" width="16" height="7.5" rx="3.5" fill="#ff9ec4"/><circle cx="22" cy="22" r="20" fill="none" stroke="#5a4f62"/></svg>
+        <span><b>全体を入れる</b><span class="note">まわりは黒</span></span>
+      </label>
+    </div>
+    <div class="drop" id="drop" role="button" tabindex="0" aria-disabled="true">
+      ここに <b>写真を落とす</b>(またはクリックして選ぶ)<br><span class="note">何枚でもまとめて送れます。送った順に並びます</span>
+    </div>
+    <input type="file" id="pick" accept="image/*" multiple hidden>
+    <div class="jobs" id="jobs"></div>
+    <p class="note">写真はこのページで画面の大きさ(StopWatch なら 466×466 くらい)に縮めて、JPEG にしてから送ります。1枚 30〜80KB くらいです。JPEG / PNG / WebP などが送れます(iPhone の HEIC は、Chrome では読めないので JPEG にしてから)。</p>
+  </section>
+
+  <section class="box">
+    <h2>本体の写真</h2>
+    <ul class="files" id="files"><li class="empty">つなぐと、ここに一覧が出ます</li></ul>
+    <div class="row"><button class="btn small danger" id="clearAll" disabled>全部消す</button></div>
+  </section>
+
+  <details>
+    <summary>やりとりの記録</summary>
+    <div class="log" id="log"></div>
+  </details>
+</main>
+
+<script id="nms-client">
+// ---- 本体との約束ごと(USB シリアル)。ブラウザでも Node のテストでも同じものを使う
+// 行: 「NMS …」で始まる1行。写真のデータは PUT のあと、2KB ずつ送って ACK を待つ
+const NMS_ERRORS = {
+  FULL: '容量が足りません', NAME: 'この名前は使えません', MANY: '写真が多すぎます(400 枚まで)', BIG: '写真が大きすぎます',
+  NOFS: '本体に写真の置き場がありません(Partition Scheme を「16M Flash (3MB APP/9.9MB FATFS)」にして書き込んでください)',
+  CRC: '送るとちゅうでデータが化けました。もう一度送ってください', TIMEOUT: '本体からの返事が途中で止まりました',
+  OPEN: '本体に書き込めませんでした', SAVE: '本体に書き込めませんでした', NOFILE: 'その写真は本体にありません',
+  STATE: '本体とのやりとりが食い違いました', ARG: '設定の値がおかしいです', CMD: '本体がこの命令を知りません(NullSlide を新しくしてください)',
+};
+// 設定の項目(本体の NullSlide と同じ並び)
+const NMS_SETTINGS = [
+  { key: 'fx',     label: '切り替え方', names: ['パッと', 'フェード', 'スライド', 'ハート'] },
+  { key: 'sec',    label: '1枚の時間',  names: ['3秒', '5秒', '10秒', '15秒', '30秒', '45秒', '1分', '手動'] },
+  { key: 'ord',    label: '順番',       names: ['送った順', 'ランダム'] },
+  { key: 'shape',  label: '形',         names: ['そのまま', 'ハート'] },
+  { key: 'bright', label: '明るさ',     names: ['1', '2', '3', '4'] },
+];
+function nmsCrc32(bytes) {
+  let c = ~0 >>> 0;
+  for (let i = 0; i < bytes.length; ++i) { c ^= bytes[i]; for (let k = 0; k < 8; ++k) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); }
+  return (~c) >>> 0;
+}
+// 本体で使える名前: 「送った順」の番号4けた + _ + 英数字と . _ - 、全部で 40 文字まで、.jpg で終わる
+function nmsSafeName(name, seq) {
+  let base = String(name).replace(/\.[^.]*$/, '');
+  base = base.replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^[._~]+/, '').replace(/_+$/, '');
+  if ((base.match(/[A-Za-z0-9]/g) || []).length < 2) base = 'photo';   // 日本語の名前など
+  return String(seq % 10000).padStart(4, '0') + '_' + base.slice(0, 31) + '.jpg';
+}
+function nmsParseCfg(line) {           // "NMS CFG fx sec ord shape bright"
+  const a = line.split(' ').slice(2).map(Number);
+  const o = {}; NMS_SETTINGS.forEach((s, i) => { o[s.key] = a[i]; }); return o;
+}
+class NmsError extends Error { constructor(code) { super(NMS_ERRORS[code] || ('本体のエラー: ' + code)); this.code = code; } }
+class NmsClient {
+  constructor(send) {               // send(Uint8Array) → Promise
+    this.send = send; this.text = ''; this.waiters = []; this.onLine = null; this.onCfg = null; this.chain = Promise.resolve();
+  }
+  onBytes(u8) {                     // 本体から届いたバイト
+    this.text += new TextDecoder('latin1').decode(u8);
+    let k;
+    while ((k = this.text.indexOf('\n')) >= 0) {
+      const line = this.text.slice(0, k).replace(/\r$/, ''); this.text = this.text.slice(k + 1);
+      if (this.onLine) this.onLine(line);
+      if (!line.startsWith('NMS ')) continue;
+      if (line.startsWith('NMS CFG ') && this.onCfg) this.onCfg(nmsParseCfg(line));   // 本体のボタンで変えたときも届く
+      const w = this.waiters.find((w) => w.pred(line));
+      if (w) { this.waiters.splice(this.waiters.indexOf(w), 1); clearTimeout(w.t); w.ok(line); }
+    }
+  }
+  waitFor(pred, ms) {
+    return new Promise((ok, ng) => {
+      const w = { pred, ok, t: setTimeout(() => { this.waiters.splice(this.waiters.indexOf(w), 1); ng(new NmsError('TIMEOUT')); }, ms) };
+      this.waiters.push(w);
+    });
+  }
+  sendLine(s) { return this.send(new TextEncoder().encode(s + '\n')); }
+  exclusive(fn) {                   // 1つずつ順番に(データを送っている途中に別の命令を混ぜない)
+    const run = this.chain.then(fn, fn); this.chain = run.catch(() => {}); return run;
+  }
+  static check(line) { if (line.startsWith('NMS ERR')) throw new NmsError(line.split(' ')[2] || '?'); return line; }
+  hello(ms = 1500) {
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => l.startsWith('NMS HELLO') || l.startsWith('NMS ERR'), ms);
+      await this.sendLine('NMS HELLO');
+      const a = NmsClient.check(await p).split(' ');
+      return { proto: +a[2], total: +a[3], used: +a[4], count: +a[5], fs: a[6] === '1', size: +a[7], seq: +a[8], round: a[9] === '1' };
+    });
+  }
+  list() {
+    return this.exclusive(async () => {
+      const files = [];
+      const p = this.waitFor((l) => { if (l.startsWith('NMS FILE ')) { const m = l.match(/^NMS FILE (\d+) (.+)$/); if (m) files.push({ size: +m[1], name: m[2] }); return false; } return l.startsWith('NMS END') || l.startsWith('NMS ERR'); }, 5000);
+      await this.sendLine('NMS LIST');
+      NmsClient.check(await p);
+      return files;
+    });
+  }
+  okReply(line) { const a = NmsClient.check(line).split(' '); return { total: +a[2], used: +a[3] }; }
+  simple(cmd, ms = 5000) {
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => /^NMS (OK|ERR)/.test(l), ms);
+      await this.sendLine(cmd);
+      return this.okReply(await p);
+    });
+  }
+  del(name) { return this.simple('NMS DEL ' + name); }
+  show(name) { return this.simple('NMS SHOW ' + name, 8000); }
+  clear() { return this.simple('NMS CLEAR', 30000); }
+  getCfg() {
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => /^NMS (CFG|ERR)/.test(l), 3000);
+      await this.sendLine('NMS CFG');
+      return nmsParseCfg(NmsClient.check(await p));
+    });
+  }
+  setCfg(c) {                       // c = { fx, sec, ord, shape, bright }
+    return this.exclusive(async () => {
+      const p = this.waitFor((l) => /^NMS (CFG|ERR)/.test(l), 3000);
+      await this.sendLine('NMS SET ' + NMS_SETTINGS.map((s) => c[s.key] | 0).join(' '));
+      return nmsParseCfg(NmsClient.check(await p));
+    });
+  }
+  put(name, bytes, onProgress) {   // bytes: Uint8Array
+    return this.exclusive(async () => {
+      const r = this.waitFor((l) => /^NMS (READY|ERR)/.test(l), 5000);
+      await this.sendLine(`NMS PUT ${bytes.length} ${name}`);
+      const chunk = +NmsClient.check(await r).split(' ')[2] || 2048;
+      let off = 0;
+      while (off < bytes.length) {
+        const n = Math.min(chunk, bytes.length - off);
+        const want = `NMS ACK ${off + n}`;
+        const a = this.waitFor((l) => l === want || l.startsWith('NMS ERR'), 10000);
+        await this.send(bytes.subarray(off, off + n));
+        NmsClient.check(await a);
+        off += n;
+        if (onProgress) onProgress(off / bytes.length);
+      }
+      const d = this.waitFor((l) => /^NMS (OK|ERR)/.test(l), 15000);
+      await this.sendLine('NMS DONE ' + nmsCrc32(bytes).toString(16));
+      return this.okReply(await d);
+    });
+  }
+}
+if (typeof module !== 'undefined') module.exports = { NmsClient, NmsError, nmsCrc32, nmsSafeName, nmsParseCfg, NMS_SETTINGS };
+</script>
+
+<script id="nms-photo">
+// 写真を、本体の画面の大きさ(size x size)の JPEG にする。
+//   fit = 'cover'(画面いっぱい。はみ出す所は切る) / 'contain'(全体を入れる。丸い画面なら、まるの中に全部入るように)
+async function nmsMakeJpeg(file, size, fit, round, quality = 0.86) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (e) { try { bmp = await createImageBitmap(file); } catch (e2) { throw new Error('この画像は読めません'); } }
+  const w = bmp.width, h = bmp.height;
+  const cv = document.createElement('canvas'); cv.width = size; cv.height = size;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, size, size);
+  g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';
+  let k;
+  if (fit === 'contain') k = round ? size / Math.hypot(w, h) : Math.min(size / w, size / h);
+  else k = Math.max(size / w, size / h);
+  const dw = w * k, dh = h * k;
+  g.drawImage(bmp, (size - dw) / 2, (size - dh) / 2, dw, dh);
+  if (bmp.close) bmp.close();
+  const blob = await new Promise((ok) => cv.toBlob(ok, 'image/jpeg', quality));
+  if (!blob) throw new Error('JPEG にできませんでした');
+  const t = document.createElement('canvas'); t.width = t.height = 80;
+  t.getContext('2d').drawImage(cv, 0, 0, 80, 80);
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.7) };
+}
+</script>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+  const log = (s) => { logEl.textContent += s + '\n'; if (logEl.textContent.length > 20000) logEl.textContent = logEl.textContent.slice(-15000); logEl.scrollTop = logEl.scrollHeight; };
+  const mb = (n) => (n / 1048576).toFixed(1) + 'MB';
+  const kb = (n) => n >= 1048576 ? mb(n) : Math.max(1, Math.round(n / 1024)) + 'KB';
+
+  if (!('serial' in navigator)) { $('noSerial').hidden = false; $('connect').disabled = true; }
+
+  let port = null, reader = null, writer = null, client = null, ready = false, info = null, helloTimer = null, wantPort = null;
+  let cfg = null;
+
+  // ---- 設定のボタン
+  const segs = {};
+  for (const s of NMS_SETTINGS) {
+    const lab = document.createElement('div'); lab.className = 'lab'; lab.textContent = s.label; lab.id = 'lab_' + s.key;
+    const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'group'); seg.setAttribute('aria-labelledby', lab.id);
+    segs[s.key] = s.names.map((n, i) => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = n; b.disabled = true; b.setAttribute('aria-pressed', 'false');
+      b.onclick = async () => {
+        if (!cfg || !client) return;
+        const want = { ...cfg, [s.key]: i };
+        showCfg(want);
+        try { showCfg(await client.setCfg(want)); } catch (e) { alert(e.message); showCfg(cfg); }
+      };
+      seg.append(b); return b;
+    });
+    $('settings').append(lab, seg);
+  }
+  function showCfg(c) {
+    if (c) cfg = c;
+    for (const s of NMS_SETTINGS) segs[s.key].forEach((b, i) => { b.disabled = !ready || !cfg; b.setAttribute('aria-pressed', cfg && cfg[s.key] === i ? 'true' : 'false'); });
+  }
+
+  function setStatus(kind, text) { $('dot').className = 'dot ' + (kind || ''); $('status').textContent = text; }
+  function setReady(v) {
+    ready = v;
+    $('drop').setAttribute('aria-disabled', v ? 'false' : 'true');
+    $('clearAll').disabled = !v;
+    showCfg(null);
+  }
+  function showCap() {
+    if (!info) { $('capBar').style.width = '0'; $('capText').textContent = '—'; return; }
+    const free = Math.max(0, info.total - info.used);
+    $('capBar').style.width = (info.total ? Math.min(100, info.used / info.total * 100) : 0).toFixed(1) + '%';
+    $('capText').innerHTML = `残り <b>${mb(free)}</b> / 全体 ${mb(info.total)}(使用 ${mb(info.used)}・写真 ${info.count} 枚)`;
+  }
+  function showFiles(files) {
+    const ul = $('files'); ul.textContent = '';
+    if (!files.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = 'まだ写真がありません'; ul.append(li); return; }
+    for (const f of files) {
+      const li = document.createElement('li');
+      const n = document.createElement('span'); n.className = 'fname'; n.textContent = f.name; n.title = f.name;
+      const s = document.createElement('span'); s.className = 'fsize'; s.textContent = kb(f.size);
+      const p = document.createElement('button'); p.className = 'btn small'; p.textContent = '見せる';
+      p.onclick = async () => { try { await client.show(f.name); } catch (e) { alert(e.message); } };
+      const d = document.createElement('button'); d.className = 'btn small'; d.textContent = '消す';
+      d.onclick = async () => {
+        if (!confirm(`「${f.name}」を本体から消しますか?`)) return;
+        try { await client.del(f.name); await refresh(); } catch (e) { alert(e.message); }
+      };
+      li.append(n, s, p, d); ul.append(li);
+    }
+  }
+  async function refresh() {
+    info = await client.hello();
+    showCap();
+    showFiles(await client.list());
+  }
+  $('clearAll').onclick = async () => {
+    if (!info || !info.count) return;
+    if (!confirm(`本体の写真 ${info.count} 枚を、全部消しますか?`)) return;
+    try { await client.clear(); await refresh(); } catch (e) { alert(e.message); }
+  };
+
+  // ---- つなぐ
+  async function openPort(p) {
+    port = p;
+    await port.open({ baudRate: 115200, bufferSize: 16384 });
+    // 本体を再起動させる信号の組み合わせ(RTS だけが入る)にならないように、RTS は切っておく
+    try { await port.setSignals({ dataTerminalReady: true, requestToSend: false }); } catch (e) {}
+    writer = port.writable.getWriter();
+    client = new NmsClient((u8) => writer.write(u8));
+    client.onLine = (l) => log(l);
+    client.onCfg = (c) => showCfg(c);
+    $('connect').hidden = true; $('disconnect').hidden = false;
+    readLoop();
+    waitHello();
+  }
+  async function readLoop() {
+    try {
+      reader = port.readable.getReader();
+      for (;;) { const { value, done } = await reader.read(); if (done) break; if (value) client.onBytes(value); }
+    } catch (e) { log('# read: ' + e.message); }
+    finally { try { reader.releaseLock(); } catch (e) {} }
+  }
+  // 本体が NullSlide を動かしていないと返事がないので、返事が来るまで聞き続ける
+  function waitHello() {
+    clearTimeout(helloTimer);
+    setReady(false);
+    setStatus('wait', '本体の返事を待っています… 本体のメニューで NullSlide を選んでください');
+    const tryOnce = async () => {
+      if (!client) return;
+      try {
+        info = await client.hello();
+        if (!info.fs) { setStatus('bad', 'つながりました。でも本体に写真の置き場がありません'); $('capText').textContent = NMS_ERRORS.NOFS; return; }
+        setStatus('on', `つながりました(画面 ${info.size}×${info.size}${info.round ? '・丸い画面' : ''})`);
+        setReady(true);
+        showCfg(await client.getCfg());
+        await refresh();
+      } catch (e) { helloTimer = setTimeout(tryOnce, 1500); }
+    };
+    tryOnce();
+  }
+  async function closePort() {
+    clearTimeout(helloTimer);
+    setReady(false); info = null; cfg = null; showCap(); showCfg(null);
+    try { if (reader) await reader.cancel(); } catch (e) {}
+    try { if (writer) { writer.releaseLock(); } } catch (e) {}
+    try { if (port) await port.close(); } catch (e) {}
+    port = reader = writer = client = null;
+    $('connect').hidden = false; $('disconnect').hidden = true;
+    setStatus('', 'つながっていません');
+  }
+  $('connect').onclick = async () => {
+    try { const p = await navigator.serial.requestPort(); wantPort = p; await openPort(p); }
+    catch (e) { if (e.name !== 'NotFoundError') { setStatus('bad', 'つなげませんでした: ' + e.message); log('# ' + e.message); } }
+  };
+  $('disconnect').onclick = async () => { wantPort = null; await closePort(); };
+  if ('serial' in navigator) {
+    // 本体が再起動すると(メニューで作品を選んだとき)いったん切れるので、同じ本体がつながり直したら自動でつなぐ
+    navigator.serial.addEventListener('disconnect', async (e) => {
+      if (port && e.target === port) { log('# 本体が切れました'); const keep = wantPort; await closePort(); wantPort = keep; if (wantPort) setStatus('wait', '本体がつながり直すのを待っています…'); }
+    });
+    navigator.serial.addEventListener('connect', async (e) => {
+      if (!port && wantPort) { log('# 本体がつながり直しました'); try { await openPort(e.target); } catch (err) { log('# ' + err.message); } }
+    });
+  }
+
+  // ---- 送る
+  async function sendFiles(list) {
+    if (!ready) { alert('先に本体につないでください'); return; }
+    const fit = document.querySelector('input[name="fit"]:checked').value;
+    for (const file of list) {
+      const job = document.createElement('div'); job.className = 'job';
+      const im = document.createElement('img'); im.alt = '';
+      const body = document.createElement('div'); body.className = 'body';
+      const t = document.createElement('div'); t.className = 't';
+      const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.append(fill);
+      body.append(t, bar); job.append(im, body); $('jobs').prepend(job);
+      t.textContent = file.name + '  準備中…';
+      try {
+        info = await client.hello();
+        const { bytes, thumb } = await nmsMakeJpeg(file, info.size, fit, info.round);
+        im.src = thumb;
+        const name = nmsSafeName(file.name, info.seq);
+        const label = `${file.name} → ${name}`;
+        const free = Math.max(0, info.total - info.used);
+        if (bytes.length + 32768 > free) throw new Error(`容量が足りません(${kb(bytes.length)} / 残り ${mb(free)})`);
+        const t0 = performance.now();
+        await client.put(name, bytes, (k) => { fill.style.width = (k * 100).toFixed(1) + '%'; t.textContent = `${label}  ${Math.round(k * 100)}%`; });
+        const sec = (performance.now() - t0) / 1000;
+        t.textContent = `${label}  送りました(${kb(bytes.length)}・${sec.toFixed(1)} 秒)`; job.classList.add('ok');
+        await refresh();
+      } catch (e) {
+        t.textContent = `${file.name}  ${e.message}`; job.classList.add('err'); fill.style.width = '0';
+        if (e.code === 'TIMEOUT') { waitHello(); break; }
+      }
+    }
+  }
+  const drop = $('drop');
+  drop.onclick = () => { if (ready) $('pick').click(); };
+  drop.onkeydown = (e) => { if ((e.key === 'Enter' || e.key === ' ') && ready) { e.preventDefault(); $('pick').click(); } };
+  $('pick').onchange = () => { sendFiles([...$('pick').files]); $('pick').value = ''; };
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); sendFiles([...e.dataTransfer.files].filter((f) => !f.type || f.type.startsWith('image/'))); });
+})();
+</script>
+</body>
+</html>
