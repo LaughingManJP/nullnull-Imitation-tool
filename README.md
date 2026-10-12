@@ -19,7 +19,7 @@
 
 ### ▶ ブラウザで試す
 
-**https://ユーザー名.github.io/unofficial-null2-m5stack/**
+**(https://laughingmanjp.github.io/nullnull-Imitation-tool/)**
 (リポジトリを公開して GitHub Pages を有効にすると、この URL で開けます。`ユーザー名` は GitHub のアカウント名に置き換えてください)
 
 本体がなくても、24作品ぜんぶをメニューから選んで動かせます(NullGif の GIF や NullSlide の写真も、エミュレータの中へ入れて試せます)。
