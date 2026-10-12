@@ -19,8 +19,8 @@
 
 ### ▶ ブラウザで試す
 
-**https://laughingmanjp.github.io/nullnull-Imitation-tool/**
-
+**https://ユーザー名.github.io/unofficial-null2-m5stack/**
+(リポジトリを公開して GitHub Pages を有効にすると、この URL で開けます。`ユーザー名` は GitHub のアカウント名に置き換えてください)
 
 本体がなくても、24作品ぜんぶをメニューから選んで動かせます(NullGif の GIF や NullSlide の写真も、エミュレータの中へ入れて試せます)。
 本体に書き込むのと同じ C++ を WebAssembly にしたもので、画面・ボタンA/B・タッチ・傾き(パッド、またはスマホの傾きセンサー)・マイク(NullGoodbye)が使えます。
