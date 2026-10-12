@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NullMenu Emulator</title>
+<style>
+/* layout: device on the left as the hero, a narrow control column on the right; stacks on phones */
+:root {
+  --bg: #0b0d12;
+  --panel: #13161e;
+  --line: #262b37;
+  --fg: #e6e8ee;
+  --muted: #8a91a3;
+  --accent: #7fd4c1;
+  --metal-hi: #c9ccd3;
+  --metal-lo: #4a4e57;
+  --key: #1c2029;
+  --display: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 14px; line-height: 1.6; }
+.wrap { max-width: 1040px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 32px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+@media (max-width: 820px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+header { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: 22px; letter-spacing: 0.02em; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); font-size: 13px; }
+
+/* ---- device ---- */
+.stage { display: flex; justify-content: center; align-items: center; min-width: 0; padding-block: 8px; }
+.device { position: relative; display: flex; align-items: center; gap: 0; }
+.watch { --size: min(78vw, 470px); position: relative; width: var(--size); aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, var(--metal-hi), var(--metal-lo) 62%, #2a2d33 100%);
+  box-shadow: 0 18px 50px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.08); display: grid; place-items: center; }
+.watch::after { content: ""; position: absolute; inset: 3.2%; border-radius: 50%; background: #050608; box-shadow: inset 0 0 12px rgba(0,0,0,.9); }
+.cores3 { --w: min(82vw, 470px); position: relative; width: var(--w); aspect-ratio: 54 / 54; border-radius: 9%;
+  background: linear-gradient(160deg, #3b3f47, #1d2026); box-shadow: 0 18px 50px rgba(0,0,0,.55), inset 0 0 0 2px rgba(255,255,255,.06);
+  display: grid; place-items: center; }
+canvas#scr { position: relative; z-index: 1; display: block; touch-action: none; cursor: crosshair; image-rendering: auto; }
+.watch canvas#scr { width: 92%; height: 92%; border-radius: 50%; }
+.cores3 canvas#scr { width: 84%; aspect-ratio: 4 / 3; height: auto; border-radius: 2px; }
+.keys { display: flex; flex-direction: column; gap: 14px; margin-left: -6px; z-index: 2; }
+.key { appearance: none; border: 1px solid #000; background: linear-gradient(90deg, #2c3038, #555a64); color: var(--fg);
+  width: 46px; height: 64px; border-radius: 0 12px 12px 0; font: 700 13px var(--mono); cursor: pointer; box-shadow: 2px 3px 8px rgba(0,0,0,.5); user-select: none; -webkit-user-select: none; touch-action: none; }
+.key:active, .key.down { transform: translateX(-3px); background: linear-gradient(90deg, #22252c, #444851); }
+.key:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.key small { display: block; font: 500 10px var(--body); color: var(--muted); }
+.boot { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; pointer-events: none; font: 600 13px var(--mono); color: var(--muted); letter-spacing: .08em; }
+
+/* ---- panel ---- */
+aside { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+section.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.box h2 { font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--muted); margin: 0; text-transform: uppercase; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { appearance: none; border: 0; background: transparent; color: var(--muted); padding: 6px 12px; font: 600 13px var(--body); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--key); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+select, .btn { appearance: none; background: var(--key); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: 500 13px var(--body); cursor: pointer; max-width: 100%; }
+select { flex: 1; min-width: 0; }
+.btn:hover, select:hover { border-color: #3a4152; }
+.pad { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 1px solid var(--line);
+  background: radial-gradient(circle, #1a1e27 0 30%, #12151c 31% 60%, #0f1218 61%); touch-action: none; cursor: grab; flex: none; }
+.pad::before, .pad::after { content: ""; position: absolute; background: var(--line); }
+.pad::before { left: 50%; top: 8px; bottom: 8px; width: 1px; }
+.pad::after { top: 50%; left: 8px; right: 8px; height: 1px; }
+.dot { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px rgba(127,212,193,.6); left: 50%; top: 50%; z-index: 1; }
+.tiltinfo { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.log { font: 11.5px/1.5 var(--mono); color: #b5bccb; background: #0a0c10; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; height: 150px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.help { color: var(--muted); font-size: 12.5px; margin: 0; }
+.help b { color: var(--fg); font-weight: 600; }
+kbd { font: 600 11px var(--mono); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--fg); background: var(--key); }
+.note { color: var(--muted); font-size: 12px; margin: 0; }
+footer { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 14px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+footer p { margin: 0 0 6px; max-width: 72ch; }
+a { color: var(--accent); }
+/* StopWatch: 実機と同じく、A(オレンジ)は左上・B(青)は右上。画面にかからないよう、ふちの外に斜めにつける */
+.device.sw { margin: 40px 34px 0; }
+.device.sw .keys { position: absolute; inset: 0; margin: 0; pointer-events: none; }
+.device.sw .key { position: absolute; pointer-events: auto; width: 150px; height: 42px; padding: 0; border-radius: 10px; border: 1px solid rgba(0,0,0,.45);
+  top: calc(50% - 0.7071 * (50% + 21px) - 21px); box-shadow: 0 3px 8px rgba(0,0,0,.5), inset 0 2px 0 rgba(255,255,255,.35); transition: transform .06s; }
+.device.sw .key span { display: block; line-height: 1.2; }
+.device.sw .key b { display: block; font-size: 13px; white-space: nowrap; }
+.device.sw .key small { color: inherit; opacity: .9; font-size: 10px; white-space: nowrap; }
+.device.sw #kA { left: calc(50% - 0.7071 * (50% + 21px) - 75px); transform: rotate(-45deg); background: linear-gradient(#ffc04d, #e8901c); color: #3a2200; }
+.device.sw #kB { right: calc(50% - 0.7071 * (50% + 21px) - 75px); transform: rotate(45deg); background: linear-gradient(#4a7cf0, #2347b4); color: #fff; }
+.device.sw #kA:active, .device.sw #kA.down { transform: rotate(-45deg) translateY(3px); filter: brightness(.85); }
+.device.sw #kB:active, .device.sw #kB.down { transform: rotate(45deg) translateY(3px); filter: brightness(.85); }
+@media (prefers-reduced-motion: reduce) { .key:active, .key.down { transform: none; } .device.sw #kA.down, .device.sw #kA:active { transform: rotate(-45deg); } .device.sw #kB.down, .device.sw #kB:active { transform: rotate(45deg); } }
+</style>
+<meta name="description" content="M5Stack StopWatch / CoreS3 用の非公式スケッチ集 NullMenu v32 を、ブラウザで試せるエミュレータ">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>NullMenu v32 エミュレータ</h1>
+    <span class="sub">本体用の C++ をそのまま WebAssembly にして動かしています(24作品入り)</span>
+  </header>
+
+  <div class="stage">
+    <div class="device" id="device">
+      <div class="watch" id="body"><canvas id="scr" width="468" height="468" aria-label="画面"></canvas><div class="boot" id="boot"></div></div>
+      <div class="keys" id="keys">
+        <button class="key" id="kA" aria-label="ボタンA(短く押す: つぎへ / メニューで長押し: ひとつ前へ)"><span><b>A つぎへ</b><small>メニューで長押し:ひとつ前へ</small></span></button>
+        <button class="key" id="kB" aria-label="ボタンB(短く押す: 決定 / 長押し: メニューへ戻る)"><span><b>B 決定</b><small>長押し:メニューへ</small></span></button>
+      </div>
+    </div>
+  </div>
+
+  <aside>
+    <section class="box">
+      <h2>本体</h2>
+      <div class="row">
+        <div class="seg" role="group" aria-label="本体">
+          <button id="mSW" aria-pressed="true">StopWatch</button>
+          <button id="mC3" aria-pressed="false">CoreS3</button>
+        </div>
+        <button class="btn" id="power">電源を入れ直す</button>
+      </div>
+      <div class="row">
+        <label for="pick" class="note">作品へ直接</label>
+        <select id="pick"><option value="-1">メニュー</option></select>
+      </div>
+      <p class="help" id="howto"></p>
+    </section>
+
+    <section class="box">
+      <h2>傾き(加速度センサー)</h2>
+      <div class="row" style="gap:14px; flex-wrap:nowrap">
+        <div class="pad" id="pad" aria-label="傾きパッド"><div class="dot" id="dot"></div></div>
+        <div class="tiltinfo">
+          <span id="tiltv">x +0.00  y +0.00</span>
+          <span>ドラッグ、または矢印キー。ダブルクリックで水平に。</span>
+          <button class="btn" id="level">水平にもどす</button>
+        </div>
+      </div>
+      <div class="row"><button class="btn" id="motion" hidden>スマホの傾きセンサーを使う</button></div>
+      <p class="note" id="motionNote">傾きで動くのは NullFloat 〜 NullBokeh の10作品と NullChronicle です。</p>
+    </section>
+
+    <section class="box">
+      <h2>マイク(NullGoodbye)</h2>
+      <div class="row">
+        <button class="btn" id="micBtn" hidden>マイクを使う</button>
+        <label class="btn" for="audio">音声ファイルを聞かせる</label>
+        <input type="file" id="audio" accept="audio/*" hidden>
+        <button class="btn" id="audioStop" hidden>止める</button>
+      </div>
+      <p class="note" id="audioNote">NullGoodbye は音に合わせて動きます。マイクを使うか、手元の音声ファイルを「マイクの音」として聞かせてください。どちらも選ぶと NullGoodbye が音を聞く状態で起動し直します。何も選ばなければ、本体と同じく自動の振り付けで動きます。</p>
+    </section>
+
+    <section class="box">
+      <h2>GIF(NullGif)</h2>
+      <div class="row">
+        <label class="btn" for="gifIn">GIF を入れる</label>
+        <input type="file" id="gifIn" accept="image/gif,.gif" multiple hidden>
+        <button class="btn" id="gifClear" hidden>全部出す</button>
+      </div>
+      <p class="note" id="gifNote">エミュレータの本体に GIF を入れて、NullGif で流します(このページを閉じると消えます)。本物の StopWatch へは、USB でつないで <a href="gif.html">GIF を送るページ</a> から送ります。</p>
+    </section>
+
+    <section class="box">
+      <h2>写真(NullSlide)</h2>
+      <div class="row">
+        <label class="btn" for="phIn">写真を入れる</label>
+        <input type="file" id="phIn" accept="image/*" multiple hidden>
+        <select id="phFit" aria-label="写真の収め方" style="flex:0 0 auto"><option value="cover">画面いっぱい</option><option value="contain">全体を入れる</option></select>
+        <button class="btn" id="phClear" hidden>全部出す</button>
+      </div>
+      <p class="note" id="phNote">エミュレータの本体に写真を入れて、NullSlide でスライドショーにします(このページを閉じると消えます)。本体の設定は B で開きます。本物の StopWatch へは、USB でつないで <a href="slide.html">写真を送るページ</a> から送ります。</p>
+    </section>
+
+    <section class="box">
+      <h2>電池</h2>
+      <div class="row">
+        <input type="range" id="bat" min="0" max="100" value="80" aria-label="電池の残り" style="flex:1;min-width:120px">
+        <span id="batV" style="min-width:3.5em;text-align:right">80%</span>
+        <label class="row" style="gap:4px"><input type="checkbox" id="batChg">充電中</label>
+      </div>
+      <p class="note">メニューの上に電池の残りが出ます。作品の最中は、15% 以下(充電していないとき)だけ画面の下に赤い電池の絵が出ます。本体は電池を数秒ごとに読むので、変えてから出るまで少しかかります。</p>
+    </section>
+
+    <section class="box">
+      <h2>Serial モニタ</h2>
+      <div class="log" id="log" role="log" aria-live="off"></div>
+      <p class="note">速さ(fps)はこのPCでの値です。本体の速さの目安にはなりません。</p>
+    </section>
+  </aside>
+
+  <footer>
+    <p><b>非公式のファン作品です。</b>パビリオン「null²」とその制作者、大阪・関西万博の関係者・権利者とは一切関係がなく、許諾も受けていません。実物の映像・音声・データは使っておらず、画面に出るものはすべてその場で計算しています。</p>
+    <p>本体(M5Stack StopWatch / CoreS3)に書き込むスケッチと同じ C++ を WebAssembly にして動かしています。速さは本体とは違います。マイクや傾きの音・値は、この端末の中だけで使い、どこにも送りません。</p>
+  </footer>
+</div>
+
+<script id="wasm" type="application/octet-stream">/*WASM_B64*/</script>
+<script>
+/*EMU_JS*/
+</script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const cv = $('scr'), ctx2d = cv.getContext('2d');
+  const logEl = $('log'), bootEl = $('boot');
+  const lines = [];
+  function log(s) { lines.push(s); if (lines.length > 200) lines.splice(0, lines.length - 200); logEl.textContent = lines.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+
+  // 565(バイト入れ替え)→ RGBA の表
+  const lut = new Uint32Array(65536);
+  for (let v = 0; v < 65536; ++v) { const c = ((v & 0xFF) << 8) | (v >> 8);
+    const r = ((c >> 11) & 31) * 255 / 31 | 0, g = ((c >> 5) & 63) * 255 / 63 | 0, b = (c & 31) * 255 / 31 | 0;
+    lut[v] = 0xFF000000 | (b << 16) | (g << 8) | r; }
+
+  const b64 = $('wasm').textContent.trim();
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  let emu = null, img = null, mode = 'SW', waitUntil = 0, nextReason = 1;
+  let tilt = { x: 0, y: 0 };
+  const keysDown = { 0: false, 1: false, 2: false };
+
+  function setMode(m) {
+    mode = m;
+    $('mSW').setAttribute('aria-pressed', m === 'SW'); $('mC3').setAttribute('aria-pressed', m === 'C3');
+    const body = $('body'); body.className = m === 'SW' ? 'watch' : 'cores3';
+    cv.width = m === 'SW' ? 468 : 320; cv.height = m === 'SW' ? 468 : 240;
+    img = ctx2d.createImageData(cv.width, cv.height);
+    $('kA').hidden = m !== 'SW'; $('kB').hidden = m !== 'SW';
+    $('kA').innerHTML = m === 'SW' ? '<span><b>A つぎへ</b><small>メニューで長押し:ひとつ前へ</small></span>' : '';
+    $('device').classList.toggle('sw', m === 'SW');
+    $('keys').querySelectorAll('.pwr').forEach((e) => e.remove());
+    if (m === 'C3') { const p = document.createElement('button'); p.className = 'key pwr'; p.id = 'kP'; p.setAttribute('aria-label', '電源ボタン'); p.innerHTML = 'P<small>電源</small>'; $('keys').appendChild(p); bindKey(p, 2); }
+    $('howto').innerHTML = m === 'SW'
+      ? '<b>A</b> つぎへ(長押しで前へ) / <b>B</b> きめる。画面をなぞって選ぶ・まん中をタップでもスタート。作品から戻るときは <b>B を1.5秒長押し</b>。キーボードの <kbd>A</kbd> <kbd>B</kbd> も使えます。'
+      : '画面を左右になぞって選び、まん中をタップでスタート。作品から戻るときは <b>画面の左上のすみを1.5秒長押し</b>。<b>P</b> は電源ボタン(<kbd>P</kbd> キー)。';
+  }
+
+  function powerOn(reason) {
+    emu = new NullMenuEmu(emu ? emu.module : bin, { log, bright: () => applyBright() });
+    emu.w = cv.width; emu.h = cv.height; emu.mic = micOn;
+    if (pendingRtc) { emu.rtc = pendingRtc; pendingRtc = null; }
+    else if (savedRtc) emu.rtc = savedRtc;
+    lines.length = 0;
+    emu.boot(reason);
+    sendBattery();
+    putGifs();
+    putPhotos();
+    emu.micW = 0;
+    for (const k of [0, 1, 2]) emu.button(k, keysDown[k]);
+    sendTilt();
+    bootEl.textContent = '';
+  }
+  let savedRtc = null, pendingRtc = null, micOn = false;
+  // ---- NullGif: エミュレータの本体の置き場に GIF を入れる(再起動のたびに入れ直す)
+  const gifs = [];
+  function gifName(n) {
+    let b = String(n).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^[._~]+/, '');
+    if ((b.match(/[A-Za-z0-9]/g) || []).length < 2) b = 'gif_' + (gifs.length + 1);
+    return b.slice(0, 36) + '.gif';
+  }
+  function putGifs() {
+    if (!emu || !emu.ex.web_fs_put) return;
+    const put = (path, bytes) => {
+      const pb = new TextEncoder().encode(path + '\0');
+      const pp = emu.ex.web_alloc(pb.length), dp = emu.ex.web_alloc(Math.max(1, bytes.length));
+      new Uint8Array(emu.mem.buffer, pp, pb.length).set(pb);
+      new Uint8Array(emu.mem.buffer, dp, bytes.length).set(bytes);
+      emu.ex.web_fs_put(pp, dp, bytes.length);
+    };
+    for (const g of gifs) put('/gif/' + g.name, g.bytes);
+  }
+  const itemNames = [];                              // 作品の名前(番号は版によって変わるので、名前で探す)
+  function itemIndex(name) { return itemNames.indexOf(name); }
+  function gifIndex() { return itemIndex('NullGif'); }
+  function showGifs() {
+    $('gifClear').hidden = !gifs.length;
+    $('gifNote').textContent = gifs.length
+      ? `入っている GIF: ${gifs.map((g) => g.name).join(', ')}(NullGif で A: 次へ・A 長押し: 前へ)`
+      : 'エミュレータの本体に GIF を入れて、NullGif で流します(このページを閉じると消えます)。本物の StopWatch へは、USB でつないで「GIF を送るページ」(gif.html)から送ります。';
+  }
+  function sendBattery() { if (emu && emu.ex.web_battery) emu.ex.web_battery(+$('bat').value, $('batChg').checked ? 1 : 0); }
+  $('bat').addEventListener('input', () => { $('batV').textContent = $('bat').value + '%'; sendBattery(); });
+  $('batChg').addEventListener('change', sendBattery);
+  function applyBright() { const v = emu ? emu.bright : 190; cv.style.filter = 'brightness(' + Math.min(1.1, 0.12 + v / 210).toFixed(3) + ')'; }
+
+  function draw() {
+    const fb = emu.framebuffer(); const out = new Uint32Array(img.data.buffer);
+    const n = Math.min(fb.length, out.length);
+    for (let i = 0; i < n; ++i) out[i] = lut[fb[i]];
+    ctx2d.putImageData(img, 0, 0);
+  }
+  function tick(t) {
+    requestAnimationFrame(tick);
+    if (performance.now() < waitUntil) return;
+    if (!emu) return;
+    if (emu.restartPending) { // 再起動のあいだ(本体と同じく、ほんの少し暗くなる)
+      savedRtc = emu.rtc.slice(); powerOn(nextReason); nextReason = 3; return;
+    }
+    let restarted = false;
+    try { restarted = emu.frame(); } catch (e) { log('!! ' + e.message); savedRtc = emu.rtc.slice(); emu = null; waitUntil = performance.now() + 800; setTimeout(() => powerOn(4), 800); return; }
+    if (restarted) {
+      ctx2d.fillStyle = '#000'; ctx2d.fillRect(0, 0, cv.width, cv.height);
+      bootEl.textContent = '';      // 本体と同じく、文字は出さずに暗くなるだけ
+      nextReason = 3; waitUntil = performance.now() + 900;
+      return;
+    }
+    draw(); feedAudio();
+    const r = emu.running(); if (+$('pick').value !== r) $('pick').value = String(r);
+  }
+
+  // ---- 触る
+  function toScreen(e) { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height }; }
+  let touching = false;
+  cv.addEventListener('pointerdown', (e) => { touching = true; cv.setPointerCapture(e.pointerId); const p = toScreen(e); emu && emu.touch(1, p.x, p.y); });
+  cv.addEventListener('pointermove', (e) => { if (!touching) return; const p = toScreen(e); emu && emu.touch(1, p.x, p.y); });
+  const up = (e) => { if (!touching) return; touching = false; const p = toScreen(e); emu && emu.touch(0, p.x, p.y); };
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+
+  // ---- ボタン
+  function bindKey(el, id) {
+    const dn = (e) => { e.preventDefault(); keysDown[id] = true; el.classList.add('down'); emu && emu.button(id, true); el.setPointerCapture && e.pointerId !== undefined && el.setPointerCapture(e.pointerId); };
+    const upk = () => { keysDown[id] = false; el.classList.remove('down'); emu && emu.button(id, false); };
+    el.addEventListener('pointerdown', dn); el.addEventListener('pointerup', upk); el.addEventListener('pointercancel', upk);
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+  bindKey($('kA'), 0); bindKey($('kB'), 1);
+  const keyMap = { a: 0, b: 1, p: 2 };
+  window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    const k = keyMap[e.key.toLowerCase()];
+    if (k !== undefined && !e.repeat) { if (k === 2 && mode !== 'C3') return; if (k < 2 && mode !== 'SW') return; keysDown[k] = true; emu && emu.button(k, true); const el = $(k === 0 ? 'kA' : k === 1 ? 'kB' : 'kP'); el && el.classList.add('down'); }
+    const step = 0.1;
+    if (e.key === 'ArrowLeft') setTilt(tilt.x - step, tilt.y); else if (e.key === 'ArrowRight') setTilt(tilt.x + step, tilt.y);
+    else if (e.key === 'ArrowUp') setTilt(tilt.x, tilt.y - step); else if (e.key === 'ArrowDown') setTilt(tilt.x, tilt.y + step);
+    else return;
+    e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => {
+    const k = keyMap[e.key.toLowerCase()]; if (k === undefined) return;
+    keysDown[k] = false; emu && emu.button(k, false); const el = $(k === 0 ? 'kA' : k === 1 ? 'kB' : 'kP'); el && el.classList.remove('down');
+  });
+
+  // ---- 傾き(右を下げると x が +、手前を下げると y が +)
+  const pad = $('pad'), dot = $('dot');
+  function setTilt(x, y) {
+    const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+    tilt = { x, y }; dot.style.left = (50 + x * 42) + '%'; dot.style.top = (50 + y * 42) + '%';
+    $('tiltv').textContent = 'x ' + (x >= 0 ? '+' : '') + x.toFixed(2) + '  y ' + (y >= 0 ? '+' : '') + y.toFixed(2);
+    sendTilt();
+  }
+  function sendTilt() { if (!emu) return; const s = 0.75; const ax = -tilt.x * s, ay = tilt.y * s; emu.accel(ax, ay, Math.sqrt(Math.max(0, 1 - ax * ax - ay * ay))); }
+  let padDrag = false;
+  const padPos = (e) => { const r = pad.getBoundingClientRect(); setTilt(((e.clientX - r.left) / r.width - 0.5) / 0.42, ((e.clientY - r.top) / r.height - 0.5) / 0.42); };
+  pad.addEventListener('pointerdown', (e) => { padDrag = true; pad.setPointerCapture(e.pointerId); padPos(e); });
+  pad.addEventListener('pointermove', (e) => padDrag && padPos(e));
+  pad.addEventListener('pointerup', () => padDrag = false);
+  pad.addEventListener('dblclick', () => setTilt(0, 0));
+  $('level').addEventListener('click', () => setTilt(0, 0));
+
+  // ---- 本体・作品
+  $('mSW').addEventListener('click', () => { if (mode === 'SW') return; setMode('SW'); savedRtc = null; powerOn(1); });
+  $('mC3').addEventListener('click', () => { if (mode === 'C3') return; setMode('C3'); savedRtc = null; powerOn(1); });
+  $('power').addEventListener('click', () => { savedRtc = emu ? emu.rtc.slice() : null; if (emu) { savedRtc = [0x4E554C32, 0xFFFFFFFF, emu.ex.web_rtc_get(2) >>> 0]; } powerOn(1); });
+  function launchDirect(i) {
+    const sel = emu ? emu.ex.web_rtc_get(2) >>> 0 : 0;
+    pendingRtc = i < 0 ? [0x4E554C32, 0xFFFFFFFF, sel] : [0x4E554C32, i, i];
+    ctx2d.fillStyle = '#000'; ctx2d.fillRect(0, 0, cv.width, cv.height);
+    emu = null; waitUntil = performance.now() + 500; setTimeout(() => powerOn(3), 500);
+  }
+  $('pick').addEventListener('change', (e) => launchDirect(+e.target.value));
+  $('gifIn').addEventListener('change', async (e) => {
+    for (const f of e.target.files) {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const sig = String.fromCharCode(...bytes.subarray(0, 6));
+      if (sig !== 'GIF87a' && sig !== 'GIF89a') { log('!! GIF ではありません: ' + f.name); continue; }
+      const name = gifName(f.name);
+      const old = gifs.findIndex((g) => g.name === name); if (old >= 0) gifs.splice(old, 1);
+      gifs.push({ name, bytes });
+    }
+    e.target.value = '';
+    showGifs();
+    const i = emu ? gifIndex() : -1;
+    if (i >= 0) launchDirect(i);                    // NullGif を、入れた GIF ごと起動し直す
+  });
+  $('gifClear').addEventListener('click', () => { gifs.length = 0; showGifs(); const i = emu ? gifIndex() : -1; if (i >= 0) launchDirect(i); });
+
+  // ---- NullSlide: エミュレータの本体の置き場に写真を入れる(送るページと同じく、画面の大きさの JPEG にしてから)
+  const photos = [];                                 // { name, file, fit, bytes, size }
+  async function makeJpeg(file, size, fit, round) {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file));
+    const w = bmp.width, h = bmp.height, c = document.createElement('canvas'); c.width = c.height = size;
+    const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, size, size); g.imageSmoothingQuality = 'high';
+    const k = fit === 'contain' ? (round ? size / Math.hypot(w, h) : Math.min(size / w, size / h)) : Math.max(size / w, size / h);
+    g.drawImage(bmp, (size - w * k) / 2, (size - h * k) / 2, w * k, h * k);
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.86));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  function putPhotos() {
+    if (!emu || !emu.ex.web_fs_put) return;
+    for (const p of photos) fsPut('/slide/' + p.name, p.bytes);
+  }
+  function fsPut(path, bytes) {
+    const pb = new TextEncoder().encode(path + '\0');
+    const pp = emu.ex.web_alloc(pb.length), dp = emu.ex.web_alloc(Math.max(1, bytes.length));
+    new Uint8Array(emu.mem.buffer, pp, pb.length).set(pb);
+    new Uint8Array(emu.mem.buffer, dp, bytes.length).set(bytes);
+    emu.ex.web_fs_put(pp, dp, bytes.length);
+  }
+  function showPhotos() {
+    $('phClear').hidden = !photos.length;
+    $('phNote').innerHTML = photos.length
+      ? `入っている写真: ${photos.length} 枚(NullSlide で A: 次へ・A 長押し: 前へ・B: 設定)`
+      : 'エミュレータの本体に写真を入れて、NullSlide でスライドショーにします(このページを閉じると消えます)。本体の設定は B で開きます。本物の StopWatch へは、USB でつないで <a href="slide.html">写真を送るページ</a> から送ります。';
+  }
+  $('phIn').addEventListener('change', async (e) => {
+    const size = mode === 'SW' ? 468 : 240, round = mode === 'SW', fit = $('phFit').value;
+    for (const f of e.target.files) {
+      try {
+        const bytes = await makeJpeg(f, size, fit, round);
+        let b = String(f.name).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^[._~]+/, '').replace(/_+$/, '');
+        if ((b.match(/[A-Za-z0-9]/g) || []).length < 2) b = 'photo';
+        photos.push({ name: String(photos.length + 1).padStart(4, '0') + '_' + b.slice(0, 31) + '.jpg', bytes });
+      } catch (err) { log('!! 読めない画像です: ' + f.name); }
+    }
+    e.target.value = '';
+    showPhotos();
+    const i = emu ? itemIndex('NullSlide') : -1;
+    if (i >= 0) launchDirect(i);                    // NullSlide を、入れた写真ごと起動し直す
+  });
+  $('phClear').addEventListener('click', () => { photos.length = 0; showPhotos(); const i = emu ? itemIndex('NullSlide') : -1; if (i >= 0) launchDirect(i); });
+
+  // ---- 音声ファイル → マイクの音(16kHz)
+  let audioCtx = null, src = null, node = null, pcm = null, pcmPos = 0, pcmT0 = 0;
+  $('audio').addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const buf = await audioCtx.decodeAudioData(await f.arrayBuffer());
+      const off = new OfflineAudioContext(1, Math.ceil(buf.duration * 16000), 16000);
+      const s = off.createBufferSource(); s.buffer = buf; s.connect(off.destination); s.start();
+      const r = await off.startRendering(); const d = r.getChannelData(0);
+      pcm = new Int16Array(d.length); for (let i = 0; i < d.length; ++i) pcm[i] = Math.max(-32768, Math.min(32767, d[i] * 32767));
+      if (src) try { src.stop(); } catch (_) {}
+      src = audioCtx.createBufferSource(); src.buffer = buf; src.loop = true; src.connect(audioCtx.destination);
+      await audioCtx.resume(); src.start(); pcmPos = 0; pcmT0 = audioCtx.currentTime;
+      if (micStream) $('micBtn').click();
+      micOn = true; $('audioStop').hidden = false;
+      $('audioNote').textContent = '「' + f.name + '」をマイクの音として流しています(くり返し)。';
+      launchDirect(itemIndex('NullGoodbye'));   // NullGoodbye を、音を聞く状態で起動し直す
+    } catch (err) { $('audioNote').textContent = 'この音声ファイルは読めませんでした。mp3 や wav を試してください。'; }
+    e.target.value = '';
+  });
+  $('audioStop').addEventListener('click', () => {
+    if (src) try { src.stop(); } catch (_) {} src = null; pcm = null; micOn = false; $('audioStop').hidden = true;
+    $('audioNote').textContent = '止めました。NullGoodbye は音を聞かない(本体の振り付けで動く)状態になります。';
+    if (emu && emu.running() === itemIndex('NullGoodbye')) launchDirect(itemIndex('NullGoodbye'));
+  });
+  function feedAudio() {
+    if (!pcm || !emu || !audioCtx) return;
+    const want = Math.floor((audioCtx.currentTime - pcmT0) * 16000);
+    if (want <= pcmPos) return;
+    const n = Math.min(want - pcmPos, 8000), chunk = new Int16Array(n);
+    for (let i = 0; i < n; ++i) chunk[i] = pcm[(pcmPos + i) % pcm.length];
+    pcmPos += n; emu.micPush(chunk);
+  }
+
+  // ---- 本物のマイク(16kHz にして渡す)
+  let micStream = null, micNode = null;
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) $('micBtn').hidden = false;
+  $('micBtn').addEventListener('click', async () => {
+    if (micStream) {               // 止める
+      micStream.getTracks().forEach((t) => t.stop()); micStream = null; if (micNode) micNode.disconnect(); micNode = null;
+      $('micBtn').textContent = 'マイクを使う'; micOn = !!pcm; if (emu && emu.running() === itemIndex('NullGoodbye')) launchDirect(itemIndex('NullGoodbye')); return;
+    }
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); await audioCtx.resume();
+      const srcN = audioCtx.createMediaStreamSource(micStream);
+      micNode = audioCtx.createScriptProcessor(2048, 1, 1);
+      const ratio = audioCtx.sampleRate / 16000; let acc = 0, accN = 0, frac = 0;
+      micNode.onaudioprocess = (ev) => {
+        const d = ev.inputBuffer.getChannelData(0); const out = [];
+        for (let i = 0; i < d.length; ++i) { acc += d[i]; accN++; frac += 1; if (frac >= ratio) { frac -= ratio; out.push(Math.max(-32768, Math.min(32767, acc / accN * 32767))); acc = 0; accN = 0; } }
+        if (emu && emu.ex && !pcm) emu.micPush(Int16Array.from(out));
+      };
+      const mute = audioCtx.createGain(); mute.gain.value = 0;
+      srcN.connect(micNode); micNode.connect(mute); mute.connect(audioCtx.destination);
+      if (src) try { src.stop(); } catch (_) {} src = null; pcm = null; $('audioStop').hidden = true;
+      micOn = true; $('micBtn').textContent = 'マイクを止める';
+      $('audioNote').textContent = 'マイクの音を NullGoodbye に聞かせています。音はこの端末の中だけで使います。';
+      launchDirect(itemIndex('NullGoodbye'));
+    } catch (err) { micStream = null; $('audioNote').textContent = 'マイクを使えませんでした(許可されなかったか、マイクがありません)。音声ファイルなら使えます。'; }
+  });
+
+  // ---- スマホの傾きセンサー(右を下げると x が +、手前を下げると y が +)
+  let motionOn = false, zAvg = 9.8, mx = 0, my = 0;
+  if ('DeviceMotionEvent' in window && ('ontouchstart' in window || navigator.maxTouchPoints > 0)) $('motion').hidden = false;
+  function onMotion(e) {
+    const g = e.accelerationIncludingGravity; if (!g || g.x === null) return;
+    zAvg = zAvg * 0.95 + (g.z || 0) * 0.05;
+    const s = zAvg < 0 ? -1 : 1;              // 端末によって向きが逆に出るので、上向きに置いたときの z で合わせる
+    mx = mx * 0.7 + (-s * g.x / 9.81) * 0.3; my = my * 0.7 + (s * g.y / 9.81) * 0.3;
+    setTilt(Math.max(-1, Math.min(1, mx / 0.75)), Math.max(-1, Math.min(1, my / 0.75)));
+  }
+  $('motion').addEventListener('click', async () => {
+    if (motionOn) { window.removeEventListener('devicemotion', onMotion); motionOn = false; $('motion').textContent = 'スマホの傾きセンサーを使う'; setTilt(0, 0); return; }
+    try {
+      if (typeof DeviceMotionEvent.requestPermission === 'function') { const r = await DeviceMotionEvent.requestPermission(); if (r !== 'granted') throw new Error('denied'); }
+      window.addEventListener('devicemotion', onMotion); motionOn = true; $('motion').textContent = '傾きセンサーを止める';
+      $('motionNote').textContent = 'スマホを手のひらに乗せて、上向きのまま傾けてください。';
+    } catch (err) { $('motionNote').textContent = '傾きセンサーを使えませんでした。パッドや矢印キーで傾けられます。'; }
+  });
+
+  // ---- はじめる
+  setMode('SW');
+  (async () => {
+    const mod = await WebAssembly.compile(bin);
+    emu = { module: mod };
+    powerOn(1);
+    const n = emu.ex.web_nitem(); const pick = $('pick'); const mem = () => new Uint8Array(emu.mem.buffer);
+    for (let i = 0; i < n; ++i) { const p = emu.ex.web_item_name(i); let s = ''; const m = mem(); for (let k = p; m[k]; ++k) s += String.fromCharCode(m[k]);
+      itemNames.push(s);
+      const o = document.createElement('option'); o.value = String(i); o.textContent = (i + 1) + '. ' + s; pick.appendChild(o); }
+    applyBright();
+    requestAnimationFrame(tick);
+  })();
+})();
+</script>
+</body>
+</html>
