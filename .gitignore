@@ -1,0 +1,10 @@
+# Arduino / PlatformIO
+build/
+.pio/
+*.bin
+*.elf
+*.hex
+
+# OS
+.DS_Store
+Thumbs.db
