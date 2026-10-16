@@ -25,8 +25,8 @@
 本体に書き込むのと同じ C++ を WebAssembly にしたもので、画面・ボタンA/B・タッチ・傾き(パッド、またはスマホの傾きセンサー)・マイク(NullGoodbye)が使えます。
 StopWatch(丸い画面)と CoreS3(四角い画面)を切り替えられます。速さは本体とは違います。
 
-GIF を本体へ送るページは **https://laughingmanjp.github.io/unofficial-null2-m5stack/gif.html**(NullGif 用)、
-写真を本体へ送るページは **https://laughingmanjp.github.io/unofficial-null2-m5stack/slide.html**(NullSlide 用)です。どちらも PC の Chrome / Edge で開きます。
+GIF を本体へ送るページは **https://laughingmanjp.github.io/unofficial-null2-m5stack/gif.html **(NullGif 用)、
+写真を本体へ送るページは **https://laughingmanjp.github.io/unofficial-null2-m5stack/slide.html **(NullSlide 用)です。どちらも PC の Chrome / Edge で開きます。
 
 **URL をクリックしたらすぐエミュレータが開くようにする手順**(最初に1回だけ)
 
