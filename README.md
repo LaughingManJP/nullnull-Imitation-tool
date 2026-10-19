@@ -29,16 +29,7 @@ StopWatch(丸い画面)と CoreS3(四角い画面)を切り替えられます。
 GIF を本体へ送るページは **https://laughingmanjp.github.io/unofficial-null2-m5stack/gif.html**(NullGif 用)、
 写真を本体へ送るページは **https://laughingmanjp.github.io/unofficial-null2-m5stack/slide.html**(NullSlide 用)です。どちらも PC の Chrome / Edge で開きます。
 
-**URL をクリックしたらすぐエミュレータが開くようにする手順**(最初に1回だけ)
 
-1. リポジトリを **Public**(公開)にする(無料のアカウントでは、公開しているリポジトリでないと GitHub Pages が使えません)
-2. リポジトリの **Settings → Pages** で、Source を「Deploy from a branch」、Branch を `main`、フォルダを `/docs` にして **Save**
-3. 数分待つと、上の URL でエミュレータが開けるようになります(Settings → Pages の上に、公開された URL が出ます)
-4. リポジトリのトップページの右側にある **About の歯車** を押して、**Website** に上の URL を入れて Save。
-   リポジトリのページの右上に URL が出るので、そこをクリックするだけでエミュレータが開きます
-5. この README の `ユーザー名` の所を、自分の GitHub のアカウント名に書き換える
-
-ページの作り直しかたは [tools/web-emulator](tools/web-emulator/) にあります。
 
 ---
 
