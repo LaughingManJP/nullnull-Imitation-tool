@@ -1,0 +1,1096 @@
+// NullLife_Nuru  -  NullMenu 用モジュール(元のスケッチ NullLife_Nuru_v6 を名前空間に入れたもの)
+// 0 で始まる変数(配列も)は、ほかの作品と共通の置き場(NM_ARENA)に置いています。
+// 一度に動くのは1つだけ(切り替えるときは再起動)なので、重なっていても問題ありません。
+#include "nm_common.h"
+#if defined(ESP_PLATFORM) && __has_include(<lgfx/v1/panel/Panel_AMOLED.hpp>)
+#include <lgfx/v1/panel/Panel_AMOLED.hpp>
+#endif
+#pragma GCC optimize("O3")
+
+namespace NullLife_Nuru {
+static constexpr size_t nmOv0 = 0;
+
+// NullLife_Nuru v6  -  null²風「生きている鏡面」
+//   M5Stack StopWatch(丸い画面)/ CoreS3・CoreS3 Lite・CoreS3 SE(四角い画面)両対応
+//   画面の形を見て自動で切り替わります。
+//
+// 触るとぬるっと:
+//   ・触る          : 膜が指に吸いつき、まわりがくぼんで、ぬちゃっと持ち上がる
+//   ・生き物を押す  : ぬるっと指の下からすり抜けて、ぷるんと震える
+//   ・なぞる        : 膜が指についてきて伸び、ぬめった跡がテカテカ光る
+//   ・触り続ける    : 中の生き物が腕を伸ばして指にくっつく
+//   ・指を離す      : 腕が糸を引いて細く伸び…ぷつっと切れて、ぷるんと縮む
+//   ・放っておく    : 表面のぬめりがゆっくり流れ、ときどき何かがぬるっと浮かぶ
+//
+// 操作:
+//   StopWatch  … ボタンA: 景色(銀/夕暮れ/ネオン/金)  ボタンB: 明るさ
+//   CoreS3系   … ダブルタップ: 景色               電源ボタン短押し: 明るさ
+//
+// 必要なもの:
+//   ボードマネージャー M5Stack >= 3.3.7
+//   ボード: StopWatch なら「M5StopWatch」、CoreS3系なら「M5CoreS3」
+//   ライブラリ M5Unified >= 0.2.15, M5GFX >= 0.2.21
+//
+// しくみ:
+//   画面の半分の細かさの格子で「高さ」を計算 → 傾きから鏡に映る方向を求め、
+//   景色テクスチャを引いて 2倍に拡大して描画。画面は8行ずつの帯に分けて、2つのコアで交互に描く。
+//   高さは帯ごとにその場で作るので、大きな表は持たない(全部、速い内蔵メモリで計算する)。
+//   高さ = ふくらんだ膜 + ねっとり変形 + ぬめり + 生き物 + 腕(糸)
+
+
+
+// Arduino IDE は関数の宣言を自動でファイルの先頭近くに足すので、型の名前を先に宣言しておく
+struct Col; struct Input; struct Scratch; struct UV; struct Lump; struct Blob;
+
+// ---- ぬるぬる具合の調整用 --------------------------------------------------
+static constexpr float GOO_STICK   = 15.0f;   // 指に吸いつく高さ
+static constexpr float GOO_GRIP    = 3.0f;    // 吸いつく速さ
+static constexpr float GOO_SUCK    = 0.35f;   // 吸いついたまわりのくぼみ
+static constexpr float GOO_DIFFUSE = 0.10f;   // 粘りの広がり(0.24以下。小さいほど跡が長く残る)
+static constexpr float GOO_RELAX   = 0.12f;   // 元に戻る速さ(小さいほどゆっくり)
+static constexpr float HEART_DOME  = 6.0f;    // 鼓動で膜がふくらむ量
+static constexpr float HEART_GLOW  = 0.22f;   // 鼓動で生き物が強まる量
+static constexpr float HEART_SWELL = 0.12f;   // 鼓動で生き物がふくらむ量
+static constexpr float LUMP_FORCE  = 6.0f;    // 生き物の動く力
+static constexpr float LUMP_DRAG   = 2.4f;    // 生き物の重たさ(大きいほど粘る)
+static constexpr float SLIP        = 26.0f;   // 押したときにすり抜ける強さ
+static constexpr float JIGGLE      = 0.35f;   // ぷるんと震える大きさ
+static constexpr float TENDRIL_IN  = 0.8f;    // 腕が伸びる速さ
+static constexpr float STRING_TIME = 1.0f;    // 離したとき糸を引く長さ(秒)
+static constexpr float SHEEN       = 0.30f;   // 表面のぬめり(テカりのゆらぎ)
+static constexpr float REFLECT     = 16.0f;   // 映り込みのゆがみ(大きいほどギラッと)
+// ---------------------------------------------------------------------------
+
+static constexpr int ENV   = 128;             // 景色テクスチャのサイズ
+static constexpr int NLUMP = 4;               // 膜の下の「生き物」の数
+static constexpr int NOISE = 64;              // ぬめり用ノイズのサイズ
+
+// 画面に合わせて起動時に決まる値
+static constexpr size_t nmOa0 = nmAlignTo(nmOv0, alignof(int)), nmOv1 = nmOa0 + sizeof(int); static int& W = *reinterpret_cast<int*>(NM_ARENA + nmOa0);
+static constexpr size_t nmOa1 = nmAlignTo(nmOv1, alignof(int)), nmOv2 = nmOa1 + sizeof(int); static int& H = *reinterpret_cast<int*>(NM_ARENA + nmOa1);
+static constexpr size_t nmOa2 = nmAlignTo(nmOv2, alignof(int)), nmOv3 = nmOa2 + sizeof(int); static int& CXN = *reinterpret_cast<int*>(NM_ARENA + nmOa2);
+static constexpr size_t nmOa3 = nmAlignTo(nmOv3, alignof(int)), nmOv4 = nmOa3 + sizeof(int); static int& CYN = *reinterpret_cast<int*>(NM_ARENA + nmOa3);
+static constexpr size_t nmOa4 = nmAlignTo(nmOv4, alignof(int)), nmOv5 = nmOa4 + sizeof(int); static int& GX = *reinterpret_cast<int*>(NM_ARENA + nmOa4);
+static constexpr size_t nmOa5 = nmAlignTo(nmOv5, alignof(int)), nmOv6 = nmOa5 + sizeof(int); static int& GY = *reinterpret_cast<int*>(NM_ARENA + nmOa5);
+static constexpr size_t nmOa6 = nmAlignTo(nmOv6, alignof(int)), nmOv7 = nmOa6 + sizeof(int); static int& GN = *reinterpret_cast<int*>(NM_ARENA + nmOa6);
+static constexpr size_t nmOa7 = nmAlignTo(nmOv7, alignof(float)), nmOv8 = nmOa7 + sizeof(float); static float& MX = *reinterpret_cast<float*>(NM_ARENA + nmOa7);
+static constexpr size_t nmOa8 = nmAlignTo(nmOv8, alignof(float)), nmOv9 = nmOa8 + sizeof(float); static float& MY = *reinterpret_cast<float*>(NM_ARENA + nmOa8);
+static constexpr size_t nmOa9 = nmAlignTo(nmOv9, alignof(float)), nmOv10 = nmOa9 + sizeof(float); static float& RR = *reinterpret_cast<float*>(NM_ARENA + nmOa9);
+static constexpr size_t nmOa10 = nmAlignTo(nmOv10, alignof(float)), nmOv11 = nmOa10 + sizeof(float); static float& RD = *reinterpret_cast<float*>(NM_ARENA + nmOa10);
+static constexpr size_t nmOa11 = nmAlignTo(nmOv11, alignof(float)), nmOv12 = nmOa11 + sizeof(float); static float& SC = *reinterpret_cast<float*>(NM_ARENA + nmOa11);
+static constexpr size_t nmOa12 = nmAlignTo(nmOv12, alignof(bool)), nmOv13 = nmOa12 + sizeof(bool); static bool& ROUND = *reinterpret_cast<bool*>(NM_ARENA + nmOa12);
+
+struct UV { uint16_t u, v; };                 // 8.8 固定小数点
+
+static uint16_t* env;          // 景色テクスチャ (内部RAM)
+static int16_t*  gooA;         // ねっとりした変形(半分の細かさの格子。256 倍した整数で持つ。内部RAM)
+static int16_t*  gooB;         // 作業用
+static constexpr float GOO_Q = 256.0f, GOO_IQ = 1.0f / 256.0f;
+static inline int16_t gooQ(float v) { v *= GOO_Q; v = v > 32000.0f ? 32000.0f : (v < -32000.0f ? -32000.0f : v); return (int16_t)(v + (v >= 0 ? 0.5f : -0.5f)); }
+static uint8_t*  mask2;        // 膜のある場所=1(半分の細かさ)
+static constexpr size_t nmOa13 = nmAlignTo(nmOv13, alignof(int)), nmOv14 = nmOa13 + sizeof(int); static int& G2X = *reinterpret_cast<int*>(NM_ARENA + nmOa13);
+static constexpr size_t nmOa14 = nmAlignTo(nmOv14, alignof(int)), nmOv15 = nmOa14 + sizeof(int); static int& G2Y = *reinterpret_cast<int*>(NM_ARENA + nmOa14);
+static constexpr size_t nmOa15 = nmAlignTo(nmOv15, alignof(int)), nmOv16 = nmOa15 + sizeof(int); static int& G2N = *reinterpret_cast<int*>(NM_ARENA + nmOa15);  // 半分の細かさの格子の大きさ
+static float*    noiseT;       // ぬめり用ノイズ
+static float*    sheenC;       // ぬめり(4マスおき)
+static constexpr size_t nmOa16 = nmAlignTo(nmOv16, alignof(int)), nmOv17 = nmOa16 + sizeof(int); static int& CGX = *reinterpret_cast<int*>(NM_ARENA + nmOa16);
+static constexpr size_t nmOa17 = nmAlignTo(nmOv17, alignof(int)), nmOv18 = nmOa17 + sizeof(int); static int& CGY = *reinterpret_cast<int*>(NM_ARENA + nmOa17);
+static int16_t*  rowS;         // 高さを計算する範囲(行ごと)
+static int16_t*  rowE;
+static int16_t*  gradS;        // 傾きを計算する範囲(行ごと)
+static int16_t*  gradE;
+static constexpr size_t nmOa18 = nmAlignTo(nmOv18, 16), nmOv19 = nmOa18 + sizeof(float[257]); static float (&expLut)[257] = *reinterpret_cast<float(*)[257]>(NM_ARENA + nmOa18);
+
+struct Lump { float x, y, vx, vy, baseAmp, sig, phase, theta, jig, jigPh; };
+static constexpr size_t nmOa19 = nmAlignTo(nmOv19, 16), nmOv20 = nmOa19 + sizeof(Lump[NLUMP]); static Lump (&lumps)[NLUMP] = *reinterpret_cast<Lump(*)[NLUMP]>(NM_ARENA + nmOa19);
+
+struct Input { bool touching; bool tapped; float tx, ty, px, py; float dt; };
+static constexpr size_t nmOa20 = nmAlignTo(nmOv20, alignof(Input)), nmOv21 = nmOa20 + sizeof(Input); static Input& simIn = *reinterpret_cast<Input*>(NM_ARENA + nmOa20);
+
+static SemaphoreHandle_t semGo, semDone;
+
+// 高さに足すふくらみ(1フレームぶんの一覧。帯を描くときに、その場で足す)
+struct Blob { float cx, cy, amp, ia, ip, dirX, dirY; int16_t x0, x1, y0, y1; bool str; };
+static constexpr int MAXBLOB = 48;
+static constexpr size_t nmOa21 = nmAlignTo(nmOv21, 16), nmOv22 = nmOa21 + sizeof(Blob[MAXBLOB]); static Blob (&blobs)[MAXBLOB] = *reinterpret_cast<Blob(*)[MAXBLOB]>(NM_ARENA + nmOa21);  // 細いふくらみ(帯で1マスずつ足す)
+static constexpr size_t nmOa22 = nmAlignTo(nmOv22, alignof(int)), nmOv23 = nmOa22 + sizeof(int); static int& nBlob = *reinterpret_cast<int*>(NM_ARENA + nmOa22);
+static constexpr size_t nmOa23 = nmAlignTo(nmOv23, 16), nmOv24 = nmOa23 + sizeof(Blob[MAXBLOB]); static Blob (&bigBlobs)[MAXBLOB] = *reinterpret_cast<Blob(*)[MAXBLOB]>(NM_ARENA + nmOa23);  // 太いふくらみ(半分の細かさの高さに足す)
+static constexpr size_t nmOa24 = nmAlignTo(nmOv24, alignof(int)), nmOv25 = nmOa24 + sizeof(int); static int& nBig = *reinterpret_cast<int*>(NM_ARENA + nmOa24);
+static constexpr float SMALL_SIG = 4.0f;    // これより細い(マス)ふくらみは、1マスずつ足す
+static int16_t* H2;                         // 高さ(半分の細かさ。256 倍した整数。2つのコアで半分ずつ作る)
+static constexpr float H2_Q = 256.0f, H2_IQ = 1.0f / 256.0f;
+static volatile int32_t phaseCnt[2] = {-1, -1};   // 2つのコアの足並みそろえ
+static constexpr size_t nmOa25 = nmAlignTo(nmOv25, alignof(int32_t)), nmOv26 = nmOa25 + sizeof(int32_t); static int32_t& phaseBase = *reinterpret_cast<int32_t*>(NM_ARENA + nmOa25);
+static constexpr int32_t PHASES = 8;           // 1フレームで使う「足並みそろえ」の回数の上限
+static constexpr size_t nmOa26 = nmAlignTo(nmOv26, alignof(int)), nmOv27 = nmOa26 + sizeof(int); static int& gooPasses = *reinterpret_cast<int*>(NM_ARENA + nmOa26);  // このフレームに2つのコアで進める「指の跡を広げる」回数(0 = 休み)
+static constexpr size_t nmOa27 = nmAlignTo(nmOv27, 16), nmOv28 = nmOa27 + sizeof(int32_t[2]); static int32_t (&gooK0)[2] = *reinterpret_cast<int32_t(*)[2]>(NM_ARENA + nmOa27);
+static constexpr size_t nmOa28 = nmAlignTo(nmOv28, 16), nmOv29 = nmOa28 + sizeof(int32_t[2]); static int32_t (&gooKd)[2] = *reinterpret_cast<int32_t(*)[2]>(NM_ARENA + nmOa28);  // その係数(14bit 固定小数点)
+static uint32_t prepUs[2] = {0, 0};
+static constexpr size_t nmOa29 = nmAlignTo(nmOv29, alignof(float)), nmOv30 = nmOa29 + sizeof(float); static float& domeDepth = *reinterpret_cast<float*>(NM_ARENA + nmOa29);
+static constexpr size_t nmOa30 = nmAlignTo(nmOv30, alignof(float)), nmOv31 = nmOa30 + sizeof(float); static float& wetK = *reinterpret_cast<float*>(NM_ARENA + nmOa30);  // このフレームの、ふくらみの深さと、ぬれたテカり
+
+// 帯(8行ずつ)
+static constexpr int BAND = 8, NSLOT = 4;
+static int SPLIT = 2;
+static constexpr size_t nmOa31 = nmAlignTo(nmOv31, alignof(int)), nmOv32 = nmOa31 + sizeof(int); static int& NB = *reinterpret_cast<int*>(NM_ARENA + nmOa31);
+static constexpr size_t nmOa32 = nmAlignTo(nmOv32, alignof(bool)), nmOv33 = nmOa32 + sizeof(bool); static bool& fbMode = *reinterpret_cast<bool*>(NM_ARENA + nmOa32);
+static constexpr size_t nmOa33 = nmAlignTo(nmOv33, alignof(bool)), nmOv34 = nmOa33 + sizeof(bool); static bool& directSend = *reinterpret_cast<bool*>(NM_ARENA + nmOa33);  // StopWatch で、画面へ直接送っているか
+
+// ---- StopWatch では、描いた帯を画面へ「直接」送る(M5GFX の PSRAM の置き場を通さない)
+//   置き場を通すと「置き場に書く → 読み直す → 送り終わるまで待つ」で、1コマに約20ms かかっていた。
+//   直接なら DMA で送るので、送っているあいだも次の帯を計算できる。画面が乱れるときは false に
+static constexpr bool DIRECT_SEND = true;
+#if defined(ESP_PLATFORM) && defined(LGFX_USE_QSPI) && __has_include(<lgfx/v1/panel/Panel_AMOLED.hpp>)
+#define NL_DIRECT_AMOLED 1
+// 置き場(Panel_AMOLED_Framebuffer)が中に持っている、本物の画面(Panel_AMOLED)を取り出す
+struct NlFbPeek : public lgfx::Panel_AMOLED_Framebuffer {
+  static lgfx::Panel_AMOLED* inner(lgfx::Panel_Device* p) {
+    return static_cast<lgfx::Panel_AMOLED_Framebuffer*>(p)->*(&NlFbPeek::_panel);
+  }
+};
+#endif
+static uint16_t* slotBuf[NSLOT];
+static constexpr size_t nmOa34 = nmAlignTo(nmOv34, alignof(int16_t*)), nmOv35 = nmOa34 + sizeof(int16_t*); static int16_t*& bandC0 = *reinterpret_cast<int16_t**>(NM_ARENA + nmOa34);
+static constexpr size_t nmOa35 = nmAlignTo(nmOv35, alignof(int16_t*)), nmOv36 = nmOa35 + sizeof(int16_t*); static int16_t*& bandC1 = *reinterpret_cast<int16_t**>(NM_ARENA + nmOa35);  // 帯の、丸にかかる範囲(2ピクセル単位)
+static constexpr size_t nmOa36 = nmAlignTo(nmOv36, alignof(int16_t*)), nmOv37 = nmOa36 + sizeof(int16_t*); static int16_t*& rowC0 = *reinterpret_cast<int16_t**>(NM_ARENA + nmOa36);
+static constexpr size_t nmOa37 = nmAlignTo(nmOv37, alignof(int16_t*)), nmOv38 = nmOa37 + sizeof(int16_t*); static int16_t*& rowC1 = *reinterpret_cast<int16_t**>(NM_ARENA + nmOa37);  // 2行ずつの、丸にかかる範囲(前の版と同じ。外側は黒のまま)
+static constexpr size_t nmOa38 = nmAlignTo(nmOv38, alignof(int16_t*)), nmOv39 = nmOa38 + sizeof(int16_t*); static int16_t*& bandHX0 = *reinterpret_cast<int16_t**>(NM_ARENA + nmOa38);
+static constexpr size_t nmOa39 = nmAlignTo(nmOv39, alignof(int16_t*)), nmOv40 = nmOa39 + sizeof(int16_t*); static int16_t*& bandHX1 = *reinterpret_cast<int16_t**>(NM_ARENA + nmOa39);  // 帯で高さを計算する範囲(格子)
+static volatile int readyW = -1, doneUpTo = -1;
+static uint32_t busyUs[2] = {0, 0}, sendUs = 0;
+struct Scratch { float* h; UV* uv; float* row; };   // 帯ごとの作業場(コアごとに1つ)
+static constexpr size_t nmOa40 = nmAlignTo(nmOv40, 16), nmOv41 = nmOa40 + sizeof(Scratch[2]); static Scratch (&scr)[2] = *reinterpret_cast<Scratch(*)[2]>(NM_ARENA + nmOa40);
+
+// 生き物の状態
+static constexpr size_t nmOa41 = nmAlignTo(nmOv41, alignof(float)), nmOv42 = nmOa41 + sizeof(float); static float& simT = *reinterpret_cast<float*>(NM_ARENA + nmOa41);
+static constexpr size_t nmOa42 = nmAlignTo(nmOv42, alignof(float)), nmOv43 = nmOa42 + sizeof(float); static float& activity = *reinterpret_cast<float*>(NM_ARENA + nmOa42);
+static constexpr size_t nmOa43 = nmAlignTo(nmOv43, alignof(float)), nmOv44 = nmOa43 + sizeof(float); static float& fear = *reinterpret_cast<float*>(NM_ARENA + nmOa43);
+static constexpr size_t nmOa44 = nmAlignTo(nmOv44, alignof(float)), nmOv45 = nmOa44 + sizeof(float); static float& wake = *reinterpret_cast<float*>(NM_ARENA + nmOa44);
+static constexpr size_t nmOa45 = nmAlignTo(nmOv45, alignof(float)), nmOv46 = nmOa45 + sizeof(float); static float& breathPhase = *reinterpret_cast<float*>(NM_ARENA + nmOa45);
+static constexpr size_t nmOa46 = nmAlignTo(nmOv46, alignof(float)), nmOv47 = nmOa46 + sizeof(float); static float& hbPhase = *reinterpret_cast<float*>(NM_ARENA + nmOa46);
+static constexpr size_t nmOa47 = nmAlignTo(nmOv47, alignof(float)), nmOv48 = nmOa47 + sizeof(float); static float& gooQuiet = *reinterpret_cast<float*>(NM_ARENA + nmOa47);
+static constexpr size_t nmOa48 = nmAlignTo(nmOv48, alignof(bool)), nmOv49 = nmOa48 + sizeof(bool); static bool& gooCleared = *reinterpret_cast<bool*>(NM_ARENA + nmOa48);
+
+// 腕(触手)と糸
+enum TState { T_NONE, T_REACH, T_STRING, T_SNAP };
+static TState tState = T_NONE;
+static int tLump = -1;
+static float strDur = 1;
+static constexpr size_t nmOa49 = nmAlignTo(nmOv49, alignof(float)), nmOv50 = nmOa49 + sizeof(float); static float& tS = *reinterpret_cast<float*>(NM_ARENA + nmOa49);
+static constexpr size_t nmOa50 = nmAlignTo(nmOv50, alignof(float)), nmOv51 = nmOa50 + sizeof(float); static float& tV = *reinterpret_cast<float*>(NM_ARENA + nmOa50);
+static constexpr size_t nmOa51 = nmAlignTo(nmOv51, alignof(float)), nmOv52 = nmOa51 + sizeof(float); static float& tTx = *reinterpret_cast<float*>(NM_ARENA + nmOa51);
+static constexpr size_t nmOa52 = nmAlignTo(nmOv52, alignof(float)), nmOv53 = nmOa52 + sizeof(float); static float& tTy = *reinterpret_cast<float*>(NM_ARENA + nmOa52);
+static constexpr size_t nmOa53 = nmAlignTo(nmOv53, alignof(float)), nmOv54 = nmOa53 + sizeof(float); static float& strT = *reinterpret_cast<float*>(NM_ARENA + nmOa53);
+
+// 表面にぬるっと浮かぶもの
+struct Bubble { float x, y, t, T, amp, sig; bool on; };
+static Bubble bubble = {0, 0, 0, 0, 0, 0, false};
+static float bubbleTimer = 4;
+
+static constexpr size_t nmOa54 = nmAlignTo(nmOv54, alignof(int)), nmOv55 = nmOa54 + sizeof(int); static int& theme = *reinterpret_cast<int*>(NM_ARENA + nmOa54);
+static const uint8_t brightSteps[] = {60, 120, 190, 255};
+static int brightIdx = 2;
+
+// ---------------------------------------------------------------- 景色
+struct Col { float r, g, b; };
+struct Theme { Col skyTop, horizon, ground, band, sun, glow; };
+static const Theme THEMES[] = {
+  // 銀 (null²っぽい昼の鏡面)
+  {{0.55f,0.72f,0.95f},{0.95f,0.97f,1.00f},{0.07f,0.08f,0.10f},{0.38f,0.40f,0.44f},{1.0f,1.0f,1.0f},{0.85f,0.92f,1.0f}},
+  // 夕暮れ
+  {{0.16f,0.10f,0.38f},{1.00f,0.55f,0.30f},{0.05f,0.03f,0.08f},{0.42f,0.18f,0.26f},{1.0f,0.85f,0.5f},{1.0f,0.55f,0.30f}},
+  // ネオン
+  {{0.01f,0.01f,0.04f},{0.12f,0.05f,0.28f},{0.00f,0.00f,0.02f},{0.00f,0.75f,0.90f},{1.0f,0.2f,0.8f},{0.30f,0.90f,1.0f}},
+  // 金
+  {{0.95f,0.82f,0.50f},{1.00f,0.97f,0.82f},{0.16f,0.09f,0.02f},{0.62f,0.42f,0.12f},{1.0f,1.0f,0.9f},{1.0f,0.90f,0.60f}},
+};
+static constexpr int NTHEME = sizeof(THEMES) / sizeof(THEMES[0]);
+
+static inline float clamp01(float v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+static inline Col lerpC(Col a, Col b, float t) {
+  return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t};
+}
+
+static void buildEnv(int th) {
+  const Theme& T = THEMES[th];
+  for (int j = 0; j < ENV; ++j) {
+    for (int i = 0; i < ENV; ++i) {
+      float x = (i - 63.5f) / 64.0f;
+      float y = (j - 63.5f) / 64.0f;               // 下向きが正
+      float hz = 0.08f + 0.06f * sinf(x * 2.2f);   // ゆるく波打つ地平線
+      Col c;
+      if (y < hz) {                                // 空
+        float s = clamp01((hz - y) / (hz + 1.0f));
+        c = lerpC(T.horizon, T.skyTop, powf(s, 0.6f));
+        float dx = x - 0.35f, dy = y + 0.55f;
+        float sun = expf(-(dx * dx + dy * dy) / 0.02f);
+        c.r += T.sun.r * sun; c.g += T.sun.g * sun; c.b += T.sun.b * sun;
+      } else {                                     // 地面と映り込む構造物
+        float gnd = clamp01((y - hz) / (1.0f - hz));
+        float bands = 0.5f + 0.5f * sinf(x * 9.0f + sinf(x * 3.0f) * 2.0f);
+        bands = powf(bands, 6.0f) * (1.0f - gnd);
+        Col base = lerpC(T.band, T.ground, powf(gnd, 0.45f));
+        c = lerpC(base, T.band, bands);
+      }
+      float g = expf(-(y - hz) * (y - hz) / 0.006f);   // 地平線の光
+      c.r += T.glow.r * g * 0.8f; c.g += T.glow.g * g * 0.8f; c.b += T.glow.b * g * 0.8f;
+
+      // ぬれたテカり: ふくらみの肩に、小さく鋭いハイライトが乗るように
+      float s1x = x + 0.13f, s1y = y + 0.17f, s2x = x + 0.27f, s2y = y + 0.36f;
+      float glint = 1.4f * expf(-(s1x * s1x + s1y * s1y) / (2 * 0.04f * 0.04f))
+                  + 0.6f * expf(-(s2x * s2x + s2y * s2y) / (2 * 0.07f * 0.07f));
+      c.r += glint; c.g += glint; c.b += glint;
+
+      uint16_t col = M5.Display.color565(clamp01(c.r) * 255, clamp01(c.g) * 255, clamp01(c.b) * 255);
+      env[j * ENV + i] = __builtin_bswap16(col);   // 色がおかしい場合はこの bswap を外す
+    }
+  }
+}
+
+// ---------------------------------------------------------------- 道具
+static inline float frand() { return (esp_random() & 0xFFFF) / 65535.0f; }
+static inline float smooth3(float t) { t = clamp01(t); return t * t * (3 - 2 * t); }
+
+static void buildNoise() {
+  float* tmp = (float*)malloc(NOISE * NOISE * sizeof(float));
+  for (int i = 0; i < NOISE * NOISE; ++i) noiseT[i] = frand() * 2 - 1;
+  for (int pass = 0; pass < 4; ++pass) {            // ぼかして、なめらかなうねりに
+    for (int y = 0; y < NOISE; ++y)
+      for (int x = 0; x < NOISE; ++x) {
+        float s = 0;
+        for (int d = -2; d <= 2; ++d) s += noiseT[y * NOISE + ((x + d) & (NOISE - 1))];
+        tmp[y * NOISE + x] = s / 5;
+      }
+    for (int y = 0; y < NOISE; ++y)
+      for (int x = 0; x < NOISE; ++x) {
+        float s = 0;
+        for (int d = -2; d <= 2; ++d) s += tmp[((y + d) & (NOISE - 1)) * NOISE + x];
+        noiseT[y * NOISE + x] = s / 5;
+      }
+  }
+  float mx = 0;
+  for (int i = 0; i < NOISE * NOISE; ++i) mx = fmaxf(mx, fabsf(noiseT[i]));
+  for (int i = 0; i < NOISE * NOISE; ++i) noiseT[i] /= mx;
+  free(tmp);
+}
+
+static inline float noiseAt(float x, float y) {
+  float fx0 = floorf(x), fy0 = floorf(y);
+  float fx = x - fx0, fy = y - fy0;
+  int x0 = (int)fx0 & (NOISE - 1), y0 = (int)fy0 & (NOISE - 1);
+  int x1 = (x0 + 1) & (NOISE - 1),  y1 = (y0 + 1) & (NOISE - 1);
+  float a = noiseT[y0 * NOISE + x0], b = noiseT[y0 * NOISE + x1];
+  float c = noiseT[y1 * NOISE + x0], d = noiseT[y1 * NOISE + x1];
+  return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+}
+
+// 丸いふくらみを、ねっとり変形(半分の細かさ)に直接足す。cx, cy, sig は高さの格子の単位
+static void addGooBlob(float cx, float cy, float amp, float sig) {
+  cx *= 0.5f; cy *= 0.5f; sig *= 0.5f;
+  if (sig < 1.0f) sig = 1.0f;
+  float inv = 32.0f / (sig * sig);
+  float rad = sig * 2.4f;
+  int x0 = max(0, (int)(cx - rad)), x1 = min(G2X - 1, (int)(cx + rad));
+  int y0 = max(0, (int)(cy - rad)), y1 = min(G2Y - 1, (int)(cy + rad));
+  for (int y = y0; y <= y1; ++y) {
+    float dy2 = (y - cy) * (y - cy);
+    int16_t* row = gooA + y * G2X;
+    for (int x = x0; x <= x1; ++x) {
+      float dx = x - cx;
+      float q = (dx * dx + dy2) * inv;
+      if (q < 255.0f) { int i = (int)q; row[x] = gooQ(row[x] * GOO_IQ + amp * (expLut[i] + (expLut[i + 1] - expLut[i]) * (q - i))); }
+    }
+  }
+}
+
+// 丸いふくらみを、高さの一覧に積む
+static void addBlob(float cx, float cy, float amp, float sig) {
+  if (sig < 1.0f) sig = 1.0f;
+  const bool big = sig >= SMALL_SIG;
+  int& n = big ? nBig : nBlob;
+  if (n >= MAXBLOB) return;
+  float rad = sig * 2.4f;
+  Blob& b = (big ? bigBlobs : blobs)[n];
+  b.cx = cx; b.cy = cy; b.amp = amp; b.ia = 32.0f / (sig * sig); b.ip = 0; b.dirX = 1; b.dirY = 0; b.str = false;
+  b.x0 = max(0, (int)(cx - rad)); b.x1 = min(GX - 1, (int)(cx + rad));
+  b.y0 = max(0, (int)(cy - rad)); b.y1 = min(GY - 1, (int)(cy + rad));
+  if (b.x0 <= b.x1 && b.y0 <= b.y1) ++n;
+}
+
+// 向きをもって伸びた(縮んだ)ふくらみを、高さの一覧に積む
+static void addStretchedBlob(float cx, float cy, float amp, float sa, float sp, float dirX, float dirY) {
+  const bool big = fminf(sa, sp) >= SMALL_SIG;
+  int& n = big ? nBig : nBlob;
+  if (n >= MAXBLOB) return;
+  float rad = fmaxf(sa, sp) * 2.4f;
+  Blob& b = (big ? bigBlobs : blobs)[n];
+  b.cx = cx; b.cy = cy; b.amp = amp; b.ia = 32.0f / (sa * sa); b.ip = 32.0f / (sp * sp); b.dirX = dirX; b.dirY = dirY; b.str = true;
+  b.x0 = max(0, (int)(cx - rad)); b.x1 = min(GX - 1, (int)(cx + rad));
+  b.y0 = max(0, (int)(cy - rad)); b.y1 = min(GY - 1, (int)(cy + rad));
+  if (b.x0 <= b.x1 && b.y0 <= b.y1) ++n;
+}
+
+static inline float sampleGoo(const int16_t* g, float x, float y) {
+  x = x < 0 ? 0 : (x > G2X - 1.001f ? G2X - 1.001f : x);
+  y = y < 0 ? 0 : (y > G2Y - 1.001f ? G2Y - 1.001f : y);
+  int x0 = (int)x, y0 = (int)y;
+  float fx = x - x0, fy = y - y0;
+  const int16_t* p = g + y0 * G2X + x0;
+  return ((p[0] * (1 - fx) + p[1] * fx) * (1 - fy) + (p[G2X] * (1 - fx) + p[G2X + 1] * fx) * fy) * GOO_IQ;
+}
+
+// 指で膜を引っぱる(指のまわりの膜を、指の動きにあわせて引きずる)
+static void dragGoo(float px, float py, float qx, float qy) {
+  px *= 0.5f; py *= 0.5f; qx *= 0.5f; qy *= 0.5f;   // 半分の細かさの格子で
+  float mx = px - qx, my = py - qy;
+  float m2 = mx * mx + my * my;
+  float jump = 15.0f * SC;
+  if (m2 < 0.000625f || m2 > jump * jump) return;  // 動いていない or 指が飛んだ
+  int rad = (int)(9 * SC);
+  float s2 = 2.0f * (4 * SC) * (4 * SC);
+  int x0 = max(1, (int)px - rad), x1 = min(G2X - 2, (int)px + rad);
+  int y0 = max(1, (int)py - rad), y1 = min(G2Y - 2, (int)py + rad);
+  if (x1 < x0 || y1 < y0) return;
+  for (int y = y0 - 1; y <= y1 + 1; ++y)            // 作業用に範囲だけ写す
+    memcpy(gooB + y * G2X + x0 - 1, gooA + y * G2X + x0 - 1, (x1 - x0 + 3) * sizeof(int16_t));
+  for (int y = y0; y <= y1; ++y)
+    for (int x = x0; x <= x1; ++x) {
+      float dx = x - px, dy = y - py;
+      float w = expf(-(dx * dx + dy * dy) / s2) * 0.95f;
+      if (w < 0.01f) continue;
+      float sx = x - w * mx, sy = y - w * my;
+      if (sx < x0 - 1 || sx >= x1 || sy < y0 - 1 || sy >= y1) continue;
+      gooA[y * G2X + x] = gooQ(sampleGoo(gooB, sx, sy));
+    }
+}
+
+static inline float softPulse(float x) { return expf(-(x * x) / (2 * 0.07f * 0.07f)); }
+
+// 腕が切れたときの、ぷつっ → ぷるん
+static void snapString() {
+  if (tLump < 0) return;
+  Lump& L = lumps[tLump];
+  addGooBlob(tTx, tTy, L.baseAmp * 0.55f, L.sig * 0.45f);   // 指先に残ったしずく
+  float dx = L.x - tTx, dy = L.y - tTy, d = sqrtf(dx * dx + dy * dy) + 0.001f;
+  L.vx += dx / d * 20.0f * SC; L.vy += dy / d * 20.0f * SC;   // 反動で少し戻る
+  L.jig = 1.0f;
+  tState = T_SNAP; tV = -2.5f;
+}
+
+// ---------------------------------------------------------------- シミュレーション
+static void simulate(const Input& in) {
+  float dt = in.dt > 0.05f ? 0.05f : in.dt;
+  simT += dt;
+
+  // 気分: 触られると興奮し、放っておくと落ち着く
+  if (in.touching) activity = fminf(1.0f, activity + dt * 0.8f);
+  else             activity = fmaxf(0.0f, activity - dt / 25.0f);
+  fear *= expf(-dt * 0.8f);
+  wake  = fminf(1.0f, wake + dt / 4.0f);             // 起動時にゆっくり目覚める
+
+  // ---- 触った瞬間: ぬちゃっと沈み、押された生き物はすり抜けて震える
+  if (in.tapped) {
+    fear = fminf(1.0f, fear + 0.6f);
+    addGooBlob(in.tx, in.ty, -6.0f * SC, 8.0f * SC);
+    for (auto& L : lumps) {
+      float dx = L.x - in.tx, dy = L.y - in.ty;
+      float d = fmaxf(sqrtf(dx * dx + dy * dy), 1.0f);
+      if (d < L.sig * 1.6f) {                        // 押された子: ぬるっと逃げて、ぷるん
+        L.vx += (dx / d * 0.8f - dy / d * 0.6f) * 45.0f * SC;
+        L.vy += (dy / d * 0.8f + dx / d * 0.6f) * 45.0f * SC;
+        L.jig = 1.0f;
+      } else {
+        float k = 20.0f * SC / (1.0f + d / (30.0f * SC));
+        L.vx += dx / d * k; L.vy += dy / d * k;
+      }
+    }
+  }
+
+  // ---- 触っている間: 吸いつき + 引っぱり
+  if (in.touching) {
+    dragGoo(in.tx, in.ty, in.px, in.py);
+    const float hx = in.tx * 0.5f, hy = in.ty * 0.5f;   // 半分の細かさの格子で
+    float s1 = 3.5f * SC, s2 = s1 * 2.2f;
+    float i1 = 1.0f / (2 * s1 * s1), i2 = 1.0f / (2 * s2 * s2);
+    float grip = fminf(1.0f, dt * GOO_GRIP);
+    float stick = GOO_STICK * SC;
+    int rad = (int)(s2 * 2.3f);
+    int x0 = max(1, (int)hx - rad), x1 = min(G2X - 2, (int)hx + rad);
+    int y0 = max(1, (int)hy - rad), y1 = min(G2Y - 2, (int)hy + rad);
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x) {
+        float dx = x - hx, dy = y - hy, d2 = dx * dx + dy * dy;
+        float w1 = expf(-d2 * i1), w2 = expf(-d2 * i2);
+        float target = stick * (w1 - GOO_SUCK * w2);   // 真ん中は持ち上がり、まわりはくぼむ
+        int16_t& gq = gooA[y * G2X + x];
+        const float g = gq * GOO_IQ;
+        gq = gooQ(g + (target - g) * grip * w2);
+      }
+  }
+
+  // ---- 粘りで広がりながら、ゆっくりたれて戻る(振動しない)
+  //      しばらく触らないと膜は平らに戻りきるので、計算を休んで軽くする
+  if (in.touching || in.tapped || tState != T_NONE) gooQuiet = 0;
+  else gooQuiet += dt;
+  gooPasses = 0;
+  if (gooQuiet > 50.0f) {
+    if (!gooCleared) { memset(gooA, 0, G2N * sizeof(int16_t)); gooCleared = true; }
+  } else {
+    gooCleared = false;
+    float relax = expf(-dt * GOO_RELAX);
+    const float diff = GOO_DIFFUSE * 0.25f;          // 格子が倍の粗さなので、1回に広がる量は 1/4
+    for (int pass = 0; pass < 2; ++pass) {
+      const float rl = pass == 0 ? relax : 1.0f;      // 整数で(14bit 固定小数点)
+      gooK0[pass] = (int32_t)(rl * 16384.0f + 0.5f); gooKd[pass] = (int32_t)(diff * rl * 16384.0f + 0.5f);
+    }
+    gooPasses = 2;                                   // 計算そのものは、描く前に2つのコアで(prepareHalf)
+  }
+
+  // ---- 呼吸と鼓動(やわらかく)
+  float period = fmaxf(3.0f, 6.0f - 2.0f * activity - 1.0f * fear);
+  breathPhase += dt * 6.2832f / period;
+  float breath = sinf(breathPhase);
+  hbPhase += dt / (1.6f - 0.5f * activity - 0.3f * fear);
+  if (hbPhase >= 1.0f) hbPhase -= 1.0f;
+  float hb = softPulse(hbPhase - 0.10f) + 0.5f * softPulse(hbPhase - 0.32f);
+
+  // ---- 腕: 伸ばす → (離すと)糸を引く → ぷつっ → ぷるんと戻る
+  if (in.touching) {
+    if (tState != T_REACH) {
+      if (tState == T_STRING) snapString();
+      float best = 1e9f;
+      for (int n = 0; n < NLUMP; ++n) {
+        float dx = lumps[n].x - in.tx, dy = lumps[n].y - in.ty, d = dx * dx + dy * dy;
+        if (d < best) { best = d; tLump = n; }
+      }
+      if (tState == T_NONE || tState == T_SNAP) tS = fmaxf(tS, 0.0f);
+      tState = T_REACH;
+    }
+    tTx = in.tx; tTy = in.ty;
+    tS = fminf(1.0f, tS + dt * TENDRIL_IN * (0.5f + activity));
+  } else if (tState == T_REACH) {
+    if (tS > 0.25f) { tState = T_STRING; strT = 0; strDur = STRING_TIME * (0.6f + 0.8f * tS); }
+    else            { tState = T_SNAP; tV = 0; }
+  }
+  if (tState == T_STRING) {
+    strT += dt;
+    if (strT >= strDur) snapString();
+  } else if (tState == T_SNAP) {                     // ばねのように、少し行き過ぎて戻る
+    tV += (-55.0f * tS - 7.0f * tV) * dt;
+    tS += tV * dt;
+    if (fabsf(tS) < 0.01f && fabsf(tV) < 0.05f) { tState = T_NONE; tS = 0; tV = 0; }
+  }
+
+  // ---- 生き物: 重たく、のたうつように動く
+  float speed = 0.5f + 0.8f * activity + 0.6f * fear;
+  for (int n = 0; n < NLUMP; ++n) {
+    Lump& L = lumps[n];
+    L.theta += dt * speed * (0.6f * sinf(simT * 0.23f + L.phase) + 0.5f * sinf(simT * 0.51f + L.phase * 1.7f));
+    float fx = cosf(L.theta) * LUMP_FORCE * SC * speed;
+    float fy = sinf(L.theta) * LUMP_FORCE * SC * speed;
+
+    float dx = L.x - MX, dy = L.y - MY;               // 画面の内側にとどまる
+    if (ROUND) {
+      float r = sqrtf(dx * dx + dy * dy) + 0.001f, lim = 0.55f * RR;
+      if (r > lim) { fx -= dx / r * (r - lim) * 2.0f; fy -= dy / r * (r - lim) * 2.0f; }
+    } else {
+      float limX = 0.70f * MX, limY = 0.62f * MY;
+      if (dx >  limX) fx -= (dx - limX) * 2.0f;
+      if (dx < -limX) fx -= (dx + limX) * 2.0f;
+      if (dy >  limY) fy -= (dy - limY) * 2.0f;
+      if (dy < -limY) fy -= (dy + limY) * 2.0f;
+    }
+
+    for (int m = 0; m < NLUMP; ++m) {                // くっつきすぎない(少し重なるのはOK)
+      if (m == n) continue;
+      float ox = L.x - lumps[m].x, oy = L.y - lumps[m].y;
+      float d = sqrtf(ox * ox + oy * oy) + 0.001f;
+      float want = (L.sig + lumps[m].sig) * 0.7f;
+      if (d < want) { fx += ox / d * (want - d) * 0.8f; fy += oy / d * (want - d) * 0.8f; }
+    }
+
+    if (in.touching) {
+      float tx = L.x - in.tx, ty = L.y - in.ty;
+      float d = sqrtf(tx * tx + ty * ty) + 0.001f;
+      float reach = L.sig * 1.3f;
+      if (d < reach) {                               // 指の下からぬるっとすり抜ける
+        float p = (reach - d) / reach;
+        float side = (n & 1) ? 1.0f : -1.0f;
+        fx += (tx / d - side * ty / d * 0.7f) * SLIP * SC * p;
+        fy += (ty / d + side * tx / d * 0.7f) * SLIP * SC * p;
+        L.jig = fmaxf(L.jig, 0.4f * p);
+      } else if (n == tLump && tState == T_REACH && d > 35 * SC) {
+        fx -= tx / d * 5.0f * SC * tS; fy -= ty / d * 5.0f * SC * tS;   // 腕を伸ばした子は体ごと寄る
+      }
+    }
+    if (n == tLump && tState == T_STRING) {          // 離されたら体を引いて、糸がのびる
+      float tx = L.x - tTx, ty = L.y - tTy;
+      float d = sqrtf(tx * tx + ty * ty) + 0.001f;
+      fx += tx / d * 14.0f * SC; fy += ty / d * 14.0f * SC;
+    }
+
+    float damp = expf(-dt * LUMP_DRAG);
+    L.vx = (L.vx + fx * dt) * damp;
+    L.vy = (L.vy + fy * dt) * damp;
+    L.x += L.vx * dt; L.y += L.vy * dt;
+    L.jig *= expf(-dt * 2.5f);
+    L.jigPh += dt * 13.0f;
+  }
+
+  // ---- 表面にときどき何かがぬるっと浮かんで、沈む
+  bubbleTimer -= dt;
+  if (!bubble.on && bubbleTimer < 0) {
+    bubble.on = true; bubble.t = 0;
+    bubble.T = 3.5f + frand() * 3.0f;
+    float a = frand() * 6.2832f, r = sqrtf(frand()) * 0.6f;
+    bubble.x = MX + cosf(a) * r * (ROUND ? RR : MX);
+    bubble.y = MY + sinf(a) * r * (ROUND ? RR : MY);
+    bubble.amp = (5.0f + frand() * 5.0f) * SC;
+    bubble.sig = (7.0f + frand() * 6.0f) * SC;
+    bubbleTimer = (6.0f + frand() * 8.0f) * (1.0f - 0.4f * activity);
+  }
+
+  // ---- ぬめり: なめらかな模様なので、4マスおきに計算して間を補う(軽くするため)
+  {
+    float ns = 0.11f / SC;
+    float o1x = simT * 0.35f, o1y = simT * 0.20f, o2x = -simT * 0.25f, o2y = simT * 0.30f;
+    for (int cy = 0; cy < CGY; ++cy)
+      for (int cx = 0; cx < CGX; ++cx) {
+        float x = cx * 4.0f, y = cy * 4.0f;
+        sheenC[cy * CGX + cx] = SHEEN * SC * (noiseAt(x * ns + o1x, y * ns + o1y) +
+                                              0.6f * noiseAt(x * ns * 1.7f + o2x, y * ns * 1.7f + o2y));
+      }
+  }
+
+  // ---- 高さ = ふくらんだ膜 + ねっとり変形 + ぬめり(帯を描くときに作る)。ここでは、このフレームの値だけ決める
+  domeDepth = ((ROUND ? 9.0f : 14.0f) + 2.0f * breath + HEART_DOME * hb) * SC;
+  wetK = 0.15f / SC;
+  nBlob = 0; nBig = 0;
+
+  // ---- 生き物
+  float gain = wake * (1.0f + 0.10f * breath + HEART_GLOW * hb) * (1.0f - 0.35f * fear);
+  for (int n = 0; n < NLUMP; ++n) {
+    Lump& L = lumps[n];
+    float wob = L.jig * JIGGLE * sinf(L.jigPh);      // ぷるぷる
+    float amp = L.baseAmp * gain * (0.85f + 0.15f * sinf(simT * 0.7f + L.phase)) * (1.0f + wob);
+    float sig = L.sig * (1.0f + 0.07f * breath + HEART_SWELL * hb);
+    float v = sqrtf(L.vx * L.vx + L.vy * L.vy);
+    float stretch = fminf(1.3f, v * 0.06f / SC);     // 速く動くほど、ねばっと伸びる
+    float dirX = v > 0.01f ? L.vx / v : 1.0f, dirY = v > 0.01f ? L.vy / v : 0.0f;
+    float sa = sig * (1.0f + stretch) * (1.0f - 0.5f * wob);
+    float sp = sig / (1.0f + 0.5f * stretch) * (1.0f + 0.5f * wob);
+    addStretchedBlob(L.x, L.y, amp, sa, sp, dirX, dirY);
+    addBlob(L.x - L.vx * 0.35f, L.y - L.vy * 0.35f, amp * 0.35f, sig * 0.8f);   // ぬめっとした余韻
+  }
+
+  // ---- 腕 / 糸
+  if (tState != T_NONE && tLump >= 0) {
+    Lump& L = lumps[tLump];
+    float e;
+    float neck = 0;                                  // 糸の細さ(0=ふつう → 1=切れる寸前)
+    float tipX = tTx, tipY = tTy;
+    if (tState == T_REACH)       e = smooth3(tS);
+    else if (tState == T_STRING) {
+      e = 1.0f;
+      neck = strT / strDur;
+      float ax = tTx - L.x, ay = tTy - L.y, al = sqrtf(ax * ax + ay * ay) + 0.001f;
+      float sag = 6.0f * SC * neck * neck;           // 先のしずくが、重みで少したれる
+      tipX += ax / al * sag; tipY += ay / al * sag;
+    } else                       e = tS;             // T_SNAP: 少し行き過ぎてもOK
+    float ax = (tipX - L.x) * e, ay = (tipY - L.y) * e;
+    float len = sqrtf(ax * ax + ay * ay);
+    if (len > 3.0f * SC) {
+      float nx = -ay / len, ny = ax / len;
+      int beads = (int)fminf(22.0f, fmaxf(5.0f, len / (3.5f * SC)));
+      float wob = (5.0f * sinf(simT * 1.1f) + 3.0f * sinf(simT * 2.3f + 1.0f)) * SC * (1.0f - neck);
+      for (int b = 1; b <= beads; ++b) {
+        float t = (float)b / beads;
+        float bend = sinf(t * 3.1416f) * wob;
+        float bx = L.x + ax * t + nx * bend;
+        float by = L.y + ay * t + ny * bend;
+        float thick = L.sig * (0.50f - 0.28f * t) + 3.5f * SC;
+        float a = L.baseAmp * gain * (0.75f - 0.35f * t);
+        if (neck > 0) {                              // 真ん中から細く、糸のように
+          float pinch = smooth3(neck * 1.3f) * expf(-(t - 0.55f) * (t - 0.55f) / (2 * 0.26f * 0.26f));
+          thick *= 1.0f - 0.80f * pinch;
+          a     *= 1.0f - 0.88f * pinch;
+        }
+        if (b == beads) { thick *= 1.3f; a *= 1.2f; }    // 先っぽは少しふくらむ(しずく)
+        addBlob(bx, by, a, fmaxf(thick, 1.5f * SC));
+      }
+    }
+  }
+
+  if (bubble.on) {
+    bubble.t += dt;
+    if (bubble.t >= bubble.T) bubble.on = false;
+    else {
+      float s = sinf(3.1416f * bubble.t / bubble.T);
+      addBlob(bubble.x, bubble.y, bubble.amp * s * s * wake, bubble.sig * (0.7f + 0.3f * s));
+    }
+  }
+}
+
+// ---------------------------------------------------------------- 描画
+static inline uint16_t envAt(uint32_t u, uint32_t v) { return env[(v >> 8) * ENV + (u >> 8)]; }
+
+// ふくらみ B を、行(縦の差 ddy)の上に足す。点の位置は x = j*step(j = ja..jb)
+//   高さの式 q = A*dx^2 + Bq*dx + C は dx の2次式なので、q < 255(見える)範囲を先に求めて、
+//   その中だけを「足し算」で進める(1点ごとのかけ算が要らない)
+static inline __attribute__((always_inline)) void addBlobRow(const Blob& B, float ddy, int ja, int jb, int step, float* row) {
+  float A, Bq, C;
+  if (!B.str) { A = B.ia; Bq = 0.0f; C = ddy * ddy * B.ia; }
+  else {
+    const float dX = B.dirX, dY = B.dirY;
+    A  = B.ia * dX * dX + B.ip * dY * dY;
+    Bq = 2.0f * ddy * dX * dY * (B.ia - B.ip);
+    C  = ddy * ddy * (B.ia * dY * dY + B.ip * dX * dX);
+  }
+  const float disc = Bq * Bq - 4.0f * A * (C - 255.0f);
+  if (disc <= 0.0f) return;
+  const float r = sqrtf(disc), i2A = 0.5f / A;
+  const float lo = (-Bq - r) * i2A + B.cx, hi = (-Bq + r) * i2A + B.cx;   // この行で見える x の範囲
+  const float istep = 1.0f / step;
+  const int j0 = max(ja, (int)ceilf(lo * istep)), j1 = min(jb, (int)floorf(hi * istep));
+  if (j0 > j1) return;
+  const float dx0 = j0 * step - B.cx, fs = (float)step;
+  float q = (A * dx0 + Bq) * dx0 + C;
+  float dq = A * (2.0f * dx0 * fs + fs * fs) + Bq * fs;
+  const float ddq = 2.0f * A * fs * fs;
+  const float amp = B.amp;
+  for (int j = j0; j <= j1; ++j) {
+    const float qq = q < 0.0f ? 0.0f : q;
+    if (qq < 255.0f) { const int i = (int)qq; row[j] += amp * (expLut[i] + (expLut[i + 1] - expLut[i]) * (qq - i)); }
+    q += dq; dq += ddq;
+  }
+}
+
+// 半分の細かさの高さ H2 の行 y2a..y2b-1 を作る(2つのコアで半分ずつ)
+//   高さ = ふくらんだ膜 + ねっとり変形 + ぬめり + 太いふくらみ。前の版と同じ式を、2マスおきの点で計算する
+static void heightHalfRows(int y2a, int y2b, float* row, const int16_t* goo) {
+  const float iRD = 1.0f / RD;
+  for (int y2 = y2a; y2 < y2b; ++y2) {
+    const int y = y2 * 2;
+    int16_t* out = H2 + y2 * G2X;
+    const int ys = min(GY - 1, y);
+    if (rowS[ys] > rowE[ys] && (y2 == 0 || rowS[min(GY - 1, y - 2)] > rowE[min(GY - 1, y - 2)]) && (y + 2 > GY - 1 || rowS[min(GY - 1, y + 2)] > rowE[min(GY - 1, y + 2)])) {
+      memset(out, 0, G2X * sizeof(int16_t)); continue;  // 画面の外
+    }
+    const float dy = (y - MY) * iRD, dy2 = dy * dy;
+    const int16_t* g = goo + y2 * G2X;
+    const float* c0 = sheenC + (min(GY - 1, y) >> 2) * CGX;
+    const float* c1 = c0 + CGX;
+    const float fy = (min(GY - 1, y) & 3) * 0.25f;
+    for (int x2 = 0; x2 < G2X; ++x2) {
+      const int x = min(GX - 1, x2 * 2);
+      const int sx = x >> 2;
+      const float a = c0[sx] + (c1[sx] - c0[sx]) * fy, b = c0[sx + 1] + (c1[sx + 1] - c0[sx + 1]) * fy;
+      const float n = a + (b - a) * ((x & 3) * 0.25f);
+      const float gg = g[x2] * GOO_IQ;
+      const float dx = (x - MX) * iRD;
+      row[x2] = -domeDepth * (dx * dx + dy2) + gg + n * (1.0f + wetK * fabsf(gg));   // 触った跡ほどテカテカ
+    }
+    for (int k = 0; k < nBig; ++k) {
+      const Blob& B = bigBlobs[k];
+      if (y < B.y0 || y > B.y1) continue;
+      const int xa = (B.x0 + 1) >> 1, xb = min(G2X - 1, B.x1 >> 1);
+      addBlobRow(B, y - B.cy, xa, xb, 2, row);      // 2マスおきの点
+    }
+    for (int x2 = 0; x2 < G2X; ++x2) {
+      float v = row[x2] * H2_Q;
+      v = v > 32000.0f ? 32000.0f : (v < -32000.0f ? -32000.0f : v);
+      out[x2] = (int16_t)(v + (v >= 0 ? 0.5f : -0.5f));
+    }
+  }
+}
+
+// 高さの1行(格子 y 行目の xa..xb)を作る: H2 をなめらかにつないで、細いふくらみを足す
+static inline void heightRow(int y, int xa, int xb, float* h) {
+  const int y2 = y >> 1;
+  const int16_t* r0 = H2 + y2 * G2X;
+  const int16_t* r1 = (y & 1) ? r0 + G2X : r0;
+  for (int x = xa; x <= xb; ++x) {
+    const int x2 = x >> 1;
+    int32_t v;
+    if (x & 1) v = r0[x2] + r0[x2 + 1] + r1[x2] + r1[x2 + 1];
+    else       v = (r0[x2] + r1[x2]) * 2;
+    h[x] = v * (H2_IQ * 0.25f);
+  }
+  for (int k = 0; k < nBlob; ++k) {                  // 細いふくらみ(q < 255 になる範囲だけ、足し算で進める)
+    const Blob& B = blobs[k];
+    if (y < B.y0 || y > B.y1) continue;
+    addBlobRow(B, y - B.cy, max((int)B.x0, xa), min((int)B.x1, xb), 1, h);
+  }
+}
+
+// 帯 k(画面の 8 行)を描く: 高さ → 映る向き → 景色を引いて 2 倍に広げる
+static void renderBand(int k, uint16_t* buf, Scratch& s) {
+  const int c0 = bandC0[k], c1 = bandC1[k];
+  const int gyA = k * (BAND / 2), gyB = min(CYN, gyA + BAND / 2) - 1;   // この帯の格子の行
+  const int hy0 = max(0, gyA - 1), hy1 = min(GY - 1, gyB + 2);
+  const int hxa = bandHX0[k], hxb = bandHX1[k];
+  for (int y = hy0; y <= hy1; ++y) heightRow(y, hxa, hxb, s.h + (y - hy0) * GX);
+  const float kk = REFLECT * 256.0f;
+  const float maxUV = (ENV - 1) * 256.0f + 255.0f;
+  const UV ctrUV = {64 * 256, 64 * 256};
+  for (int y = gyA; y <= gyB + 1; ++y) {
+    UV* out = s.uv + (y - gyA) * GX;
+    for (int x = c0; x <= c1; ++x) out[x] = ctrUV;             // 計算しない場所は景色の中心
+    const int ym = y > 0 ? y - 1 : 0, yp = y < GY - 1 ? y + 1 : GY - 1;
+    const float* hm = s.h + (ym - hy0) * GX;
+    const float* hc = s.h + (y - hy0) * GX;
+    const float* hp = s.h + (yp - hy0) * GX;
+    const int xs = max((int)gradS[y], c0), xe = min((int)gradE[y], c1);
+    for (int x = xs; x <= xe; ++x) {
+      const int xm = x > 0 ? x - 1 : 0, xp = x < GX - 1 ? x + 1 : GX - 1;
+      float u = 64.0f * 256.0f + (hc[xp] - hc[xm]) * kk;
+      float v = 64.0f * 256.0f + (hp[x] - hm[x]) * kk;
+      u = u < 0 ? 0 : (u > maxUV ? maxUV : u);
+      v = v < 0 ? 0 : (v > maxUV ? maxUV : v);
+      out[x] = {(uint16_t)u, (uint16_t)v};
+    }
+  }
+  const int bw = (c1 - c0) * 2;
+  for (int gy = gyA; gy <= gyB; ++gy) {
+    const UV* r0 = s.uv + (gy - gyA) * GX;
+    const UV* r1 = r0 + GX;
+    uint16_t* row0 = buf + (gy - gyA) * 2 * bw;
+    uint16_t* row1 = row0 + bw;
+    const int rc0 = rowC0[gy], rc1 = rowC1[gy];
+    for (int cx = c0; cx < c1; ++cx) {
+      const int o = (cx - c0) * 2;
+      if (cx < rc0 || cx >= rc1) { row0[o] = row0[o + 1] = row1[o] = row1[o + 1] = 0; continue; }   // 丸の外
+      const UV a = r0[cx], b = r0[cx + 1], c = r1[cx], d = r1[cx + 1];
+      row0[o]     = envAt(a.u, a.v);
+      row0[o + 1] = envAt((a.u + b.u) >> 1, (a.v + b.v) >> 1);
+      row1[o]     = envAt((a.u + c.u) >> 1, (a.v + c.v) >> 1);
+      row1[o + 1] = envAt((a.u + b.u + c.u + d.u) >> 2, (a.v + b.v + c.v + d.v) >> 2);
+    }
+  }
+}
+static void __attribute__((noinline)) MOD_IRAM renderBandIram(int k, uint16_t* b, Scratch& s) { renderBand(k, b, s); }
+
+// 指の跡を広げて、ゆっくり戻す(行 ya..yb-1。src → dst)。2つのコアで行を分ける
+static void gooDiffuseRows(const int16_t* __restrict src, int16_t* __restrict dst, int ya, int yb, int32_t k0, int32_t kd) {
+  for (int y = max(1, ya); y < min(G2Y - 1, yb); ++y) {
+    int i = y * G2X + 1;
+    for (int x = 1; x < G2X - 1; ++x, ++i) {
+      if (!mask2[i]) { dst[i] = 0; continue; }
+      const int32_t lap = src[i - 1] + src[i + 1] + src[i - G2X] + src[i + G2X] - 4 * src[i];
+      const int32_t nb = (src[i] * k0 + lap * kd + 8192) >> 14;
+      dst[i] = (int16_t)(nb > 32000 ? 32000 : (nb < -32000 ? -32000 : nb));
+    }
+  }
+}
+
+// コア0: コア1が描かない帯
+// もう片方のコアが「target 番目」まで終わるのを待つ
+static inline void barrier(int me, int32_t target) {
+  __atomic_store_n(&phaseCnt[me], target, __ATOMIC_RELEASE);
+  while (__atomic_load_n(&phaseCnt[1 - me], __ATOMIC_ACQUIRE) < target) { }
+}
+
+// 指の跡の計算(2つのコアで行を半分ずつ)。できあがった跡の置き場を返す
+static const int16_t* gooStep(int me, int ya, int yb, int32_t& ph) {
+  int16_t* src = gooA; int16_t* dst = gooB;
+  for (int p = 0; p < gooPasses; ++p) {             // 粘りで広げて、ゆっくり戻す
+    gooDiffuseRows(src, dst, ya, yb, gooK0[p], gooKd[p]);
+    barrier(me, ++ph); int16_t* t = src; src = dst; dst = t;
+  }
+  return src;
+}
+
+// このフレームの下ごしらえ(2つのコアで半分ずつ)
+static void prepareHalf(int me) {
+  const uint32_t t0 = micros();
+  int32_t ph = phaseBase;
+  const int mid = G2Y / 2, ya = me == 0 ? 0 : mid, yb = me == 0 ? mid : G2Y;
+  const int16_t* goo = gooStep(me, ya, yb, ph);
+  heightHalfRows(ya, yb, scr[me].row, goo);
+  barrier(me, ++ph);
+  prepUs[me] = micros() - t0;
+}
+
+static void workerTask(void*) {
+  for (;;) {
+    xSemaphoreTake(semGo, portMAX_DELAY);
+    prepareHalf(0);
+    uint32_t busy = 0;
+    for (int k = 0; k < NB; ++k) {
+      if (k % SPLIT == 0) continue;
+      while (__atomic_load_n(&doneUpTo, __ATOMIC_ACQUIRE) < k - NSLOT) { }
+      if (bandC1[k] > bandC0[k]) {
+        uint32_t t0 = micros();
+        renderBandIram(k, slotBuf[k % NSLOT], scr[0]);
+        busy += micros() - t0;
+      }
+      __atomic_store_n(&readyW, k, __ATOMIC_RELEASE);
+    }
+    busyUs[0] = busy;
+    xSemaphoreGive(semDone);
+  }
+}
+
+// コア1: SPLIT 本に1本の帯を描き、すべての帯を順番に画面へ送る
+static void renderFrame() {
+  __atomic_store_n(&readyW, -1, __ATOMIC_RELEASE);
+  __atomic_store_n(&doneUpTo, -1, __ATOMIC_RELEASE);
+  xSemaphoreGive(semGo);
+  prepareHalf(1);
+  uint32_t busy = 0, send = 0;
+  if (!fbMode) M5.Display.startWrite();
+  for (int k = 0; k < NB; ++k) {
+    const bool vis = bandC1[k] > bandC0[k];
+    if (k % SPLIT == 0) {
+      if (vis) {
+        uint32_t t0 = micros();
+        renderBandIram(k, slotBuf[k % NSLOT], scr[1]);
+        busy += micros() - t0;
+      }
+    } else {
+      while (__atomic_load_n(&readyW, __ATOMIC_ACQUIRE) < k) { }
+    }
+    if (!fbMode) { const uint32_t tw = micros(); M5.Display.waitDMA(); send += micros() - tw; }   // 前の帯を送り終わるまで待つ
+    __atomic_store_n(&doneUpTo, k - 1, __ATOMIC_RELEASE);
+    if (vis) {
+      const int y0 = k * BAND, h = min(BAND, H - y0);
+      const int x0 = bandC0[k] * 2, w = (bandC1[k] - bandC0[k]) * 2;
+      if (fbMode) {
+        const uint32_t t0 = micros();
+        M5.Display.pushImage(x0, y0, w, h, slotBuf[k % NSLOT]);
+        send += micros() - t0;
+      } else {
+        M5.Display.pushImageDMA(x0, y0, w, h, slotBuf[k % NSLOT]);
+      }
+    }
+  }
+  if (!fbMode) M5.Display.waitDMA();
+  __atomic_store_n(&doneUpTo, NB, __ATOMIC_RELEASE);
+  if (!fbMode) M5.Display.endWrite();
+  xSemaphoreTake(semDone, portMAX_DELAY);
+  phaseBase += PHASES;
+  if (gooPasses & 1) { int16_t* t = gooA; gooA = gooB; gooB = t; }
+  busyUs[1] = busy;
+  sendUs = send;
+}
+
+// 内蔵メモリを優先、足りなければ PSRAM。内蔵メモリは、画面の転送やタスクのために 48KB は残しておく
+static void* allocFast(size_t n) {
+  if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= n + 48 * 1024) {
+    void* p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (p) return p;
+  }
+  return ps_malloc(n);
+}
+
+static void fail(const char* msg) {
+  M5.Display.setTextDatum(middle_center);
+  M5.Display.drawString(msg, M5.Display.width() / 2, M5.Display.height() / 2);
+  Serial.println(msg);
+  while (true) nmIdle();
+}
+
+__attribute__((cold)) void setup() {   // cold: 1回だけ動くので、小さく作る
+  auto cfg = M5.config();
+  M5.begin(cfg);
+  Serial.println("NullLife_Nuru v6");
+  Serial.begin(115200);
+#if defined(ESP_PLATFORM)
+  if (getCpuFrequencyMhz() < 240) setCpuFrequencyMhz(240);   // 計算が多いので、いちばん速い設定で
+  Serial.printf("cpu %d MHz\n", (int)getCpuFrequencyMhz());
+#endif
+
+  // 画面の形で機種を判断: 正方形 = StopWatch(丸)、横長 = CoreS3系
+  ROUND = (M5.Display.width() == M5.Display.height());
+  if (!ROUND && M5.Display.width() < M5.Display.height()) M5.Display.setRotation(1);
+  W = M5.Display.width();
+  H = M5.Display.height();
+  CXN = W / 2; CYN = H / 2;
+  GX = CXN + 1; GY = CYN + 1; GN = GX * GY;
+  MX = (GX - 1) * 0.5f; MY = (GY - 1) * 0.5f;
+  RR = fminf(MX, MY);
+  RD = ROUND ? RR : 100.0f;
+  SC = fminf(GX, GY) / 121.0f;                      // CoreS3 を基準(1.0)にした大きさ
+  Serial.printf("screen %dx%d  %s  grid %dx%d\n", W, H, ROUND ? "round" : "rect", GX, GY);
+
+  M5.Display.fillScreen(TFT_BLACK);
+  M5.Display.setBrightness(brightSteps[brightIdx]);
+
+  G2X = CXN / 2 + 2; G2Y = CYN / 2 + 2; G2N = G2X * G2Y;
+  NB = (H + BAND - 1) / BAND;
+  CGX = (GX + 3) / 4 + 2; CGY = (GY + 3) / 4 + 2;
+  env      = (uint16_t*)heap_caps_malloc(ENV * ENV * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  noiseT   = (float*)heap_caps_malloc(NOISE * NOISE * sizeof(float), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  for (int i = 0; i < NSLOT; ++i) slotBuf[i] = (uint16_t*)heap_caps_malloc(W * BAND * 2, MALLOC_CAP_DMA);
+  sheenC   = (float*)heap_caps_calloc(CGX * CGY, sizeof(float), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  rowS  = (int16_t*)malloc(GY * sizeof(int16_t)); rowE  = (int16_t*)malloc(GY * sizeof(int16_t));
+  gradS = (int16_t*)malloc(GY * sizeof(int16_t)); gradE = (int16_t*)malloc(GY * sizeof(int16_t));
+  bandC0 = (int16_t*)malloc(NB * sizeof(int16_t)); bandC1 = (int16_t*)malloc(NB * sizeof(int16_t));
+  bandHX0 = (int16_t*)malloc(NB * sizeof(int16_t)); bandHX1 = (int16_t*)malloc(NB * sizeof(int16_t));
+  rowC0 = (int16_t*)malloc(GY * sizeof(int16_t)); rowC1 = (int16_t*)malloc(GY * sizeof(int16_t));
+  for (int c = 0; c < 2; ++c) {
+    scr[c].h  = (float*)heap_caps_malloc((BAND / 2 + 3) * GX * sizeof(float), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    scr[c].uv = (UV*)heap_caps_malloc((BAND / 2 + 1) * GX * sizeof(UV), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    scr[c].row = (float*)heap_caps_malloc(G2X * sizeof(float), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
+  H2 = (int16_t*)heap_caps_calloc(G2N, sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!H2) H2 = (int16_t*)ps_calloc(G2N, sizeof(int16_t));
+  mask2 = (uint8_t*)heap_caps_malloc(G2N, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  gooA  = (int16_t*)allocFast(G2N * sizeof(int16_t));
+  gooB  = (int16_t*)allocFast(G2N * sizeof(int16_t));
+  bool ok = env && noiseT && sheenC && rowS && rowE && gradS && gradE && bandC0 && bandC1 && bandHX0 && bandHX1 && rowC0 && rowC1 && mask2 && gooA && gooB;
+  for (int i = 0; i < NSLOT; ++i) ok = ok && slotBuf[i];
+  for (int c = 0; c < 2; ++c) ok = ok && scr[c].h && scr[c].uv && scr[c].row;
+  ok = ok && H2;
+  if (!ok) fail("Memory error (PSRAM?)");
+  memset(gooA, 0, G2N * sizeof(int16_t)); memset(gooB, 0, G2N * sizeof(int16_t));
+  for (int y = 0; y < G2Y; ++y)                      // 膜のある場所(半分の細かさ)
+    for (int x = 0; x < G2X; ++x) {
+      float dx = (x * 2 - MX) / RD, dy = (y * 2 - MY) / RD;
+      mask2[y * G2X + x] = ROUND ? (dx * dx + dy * dy < 0.98f) : 1;
+    }
+
+  // 計算する範囲: 四角い画面は全部。丸い画面は円の内側だけ(少し余裕をもたせる)
+  for (int y = 0; y < GY; ++y) {
+    if (!ROUND) { rowS[y] = 0; rowE[y] = GX - 1; gradS[y] = 0; gradE[y] = GX - 1; continue; }
+    float dy = y - MY;
+    float rh = RR + 4.0f, rg = RR + 2.0f;
+    float wh = rh * rh - dy * dy, wg = rg * rg - dy * dy;
+    int hs = 0, he = -1, gs = 1, ge = 0;
+    if (wh > 0) { float s = sqrtf(wh); hs = max(0, (int)floorf(MX - s)); he = min(GX - 1, (int)ceilf(MX + s)); }
+    if (wg > 0 && y > 0 && y < GY - 1) {
+      float s = sqrtf(wg); gs = max(1, (int)floorf(MX - s)); ge = min(GX - 2, (int)ceilf(MX + s));
+    }
+    rowS[y] = hs; rowE[y] = he; gradS[y] = gs; gradE[y] = ge;
+  }
+  // 帯ごとの範囲: 描く幅(前の版と同じく、2行ずつ丸にかかる幅)と、高さを計算する幅
+  {
+    const float rr = W * 0.5f, ctr = (W - 1) * 0.5f;
+    for (int k = 0; k < NB; ++k) {
+      int a = CXN, b = 0, ha = GX - 1, hb = 0;
+      const int gyA = k * (BAND / 2), gyB = min(CYN, gyA + BAND / 2) - 1;
+      for (int gy = gyA; gy <= gyB; ++gy) {
+        int c0 = 0, c1 = CXN;
+        if (ROUND) {
+          const float dy = fminf(fabsf(gy * 2 - ctr), fabsf(gy * 2 + 1 - ctr)), w2 = rr * rr - dy * dy;
+          if (w2 <= 0) { c0 = c1 = 0; }
+          else {
+            const float hw = sqrtf(w2) + 1.0f;
+            c0 = max(0, (int)floorf((ctr - hw) * 0.5f)); c1 = min(CXN, (int)ceilf((ctr + hw + 1.0f) * 0.5f));
+          }
+        }
+        rowC0[gy] = c0; rowC1[gy] = c1;
+        if (c1 > c0) { a = min(a, c0); b = max(b, c1); }
+      }
+      for (int y = gyA; y <= gyB + 1 && y < GY; ++y)
+        if (gradS[y] <= gradE[y]) { ha = min(ha, gradS[y] - 1); hb = max(hb, gradE[y] + 1); }
+      if (b <= a) { a = b = 0; }
+      if (hb < ha) { ha = 0; hb = 0; }
+      bandC0[k] = a; bandC1[k] = b;
+      bandHX0[k] = max(0, ha); bandHX1[k] = min(GX - 1, hb);
+    }
+  }
+  for (int i = 0; i < 257; ++i) expLut[i] = expf(-i / 32.0f);
+  buildNoise();
+
+  for (auto& L : lumps) {
+    L.x = MX + (frand() - 0.5f) * (ROUND ? RR : MX);
+    L.y = MY + (frand() - 0.5f) * (ROUND ? RR : MY);
+    L.vx = L.vy = 0;
+    L.baseAmp = (8.0f + frand() * 5.0f) * SC;
+    L.sig     = (13.0f + frand() * 8.0f) * SC;       // 大きめで、ぼてっと
+    L.phase   = frand() * 6.2832f;
+    L.theta   = frand() * 6.2832f;
+    L.jig = 0; L.jigPh = frand() * 6.2832f;
+  }
+
+  buildEnv(theme);
+
+  // 最初の1枚
+  simIn = {false, false, 0, 0, 0, 0, 0.016f};
+  simulate(simIn);
+
+  // StopWatch の M5GFX は、画面の手前に PSRAM の置き場を持ち、描き終わるたびに自動で画面へ送る
+  { auto* pnl = M5.Display.getPanel(); fbMode = pnl && pnl->getAutoDisplay();
+#if defined(NL_DIRECT_AMOLED)
+    if (fbMode && DIRECT_SEND && M5.getBoard() == m5::board_t::board_M5StopWatch) {
+      lgfx::Panel_AMOLED* inner = NlFbPeek::inner(pnl);
+      if (inner) { M5.Display.setPanel(inner); fbMode = false; directSend = true; }   // ここからは本物の画面へ直接
+    }
+#endif
+  }
+  SPLIT = fbMode ? 4 : 2;                          // 送る係のコア1は、帯4本に1本だけ描く
+  Serial.printf("display: %s\n", fbMode ? "framebuffer (send each band)" : directSend ? "direct DMA (StopWatch, no framebuffer)" : "direct DMA");
+  semGo   = xSemaphoreCreateBinary();
+  semDone = xSemaphoreCreateBinary();
+  xTaskCreatePinnedToCore(workerTask, "band", 8192, nullptr, 1, nullptr, 0);
+}
+
+void loop() {
+  static uint32_t last = millis();
+  static uint32_t fpsTimer = millis();
+  static uint32_t lastTapMs = 0;
+  static float prevX = 0, prevY = 0;
+  static int frames = 0;
+
+  M5.update();
+
+  auto t = M5.Touch.getDetail();
+  uint32_t now = millis();
+  bool pressed = t.wasPressed();
+
+  if (ROUND) {                                       // StopWatch: ボタンで操作
+    if (M5.BtnA.wasPressed()) { theme = (theme + 1) % NTHEME; buildEnv(theme); }
+    if (M5.BtnB.wasPressed()) {
+      brightIdx = (brightIdx + 1) % sizeof(brightSteps);
+      M5.Display.setBrightness(brightSteps[brightIdx]);
+    }
+  } else {                                           // CoreS3: ダブルタップと電源ボタン
+    if (M5.BtnPWR.wasClicked()) {
+      brightIdx = (brightIdx + 1) % sizeof(brightSteps);
+      M5.Display.setBrightness(brightSteps[brightIdx]);
+    }
+    if (pressed) {
+      if (now - lastTapMs < 350) { theme = (theme + 1) % NTHEME; buildEnv(theme); lastTapMs = 0; }
+      else lastTapMs = now;
+    }
+  }
+
+  float tx = t.x * 0.5f, ty = t.y * 0.5f;
+  if (pressed) { prevX = tx; prevY = ty; }
+
+  simIn.touching = t.isPressed();
+  simIn.tapped   = pressed;
+  simIn.tx = tx;    simIn.ty = ty;
+  simIn.px = prevX; simIn.py = prevY;
+  simIn.dt = (now - last) / 1000.0f;
+  last = now;
+  prevX = tx; prevY = ty;
+
+  const uint32_t ts = micros();
+  simulate(simIn);                    // 動きを進める(軽い)
+  const uint32_t simUs = micros() - ts;
+  renderFrame();                      // 高さ・映る向き・色を帯ごとに作って描く(2つのコア)
+
+  if (++frames, millis() - fpsTimer >= 3000) {
+    Serial.printf("fps: %.1f  sim %.1f ms  prep %.1f/%.1f ms  core0 %.1f ms  core1 %.1f ms  send %.1f ms\n", frames * 1000.0f / (millis() - fpsTimer),
+                  simUs / 1000.0f, prepUs[0] / 1000.0f, prepUs[1] / 1000.0f, busyUs[0] / 1000.0f, busyUs[1] / 1000.0f, sendUs / 1000.0f);
+    frames = 0; fpsTimer = millis();
+  }
+}
+
+
+// 共通の置き場に置いたものは、0 で始まる単純な型だけ(コンストラクタが要らないもの)
+static_assert(std::is_trivially_default_constructible<Blob>::value, "NM_ARENA: Blob");
+static_assert(std::is_trivially_default_constructible<Input>::value, "NM_ARENA: Input");
+static_assert(std::is_trivially_default_constructible<Lump>::value, "NM_ARENA: Lump");
+static_assert(std::is_trivially_default_constructible<Scratch>::value, "NM_ARENA: Scratch");
+static_assert(std::is_trivially_default_constructible<bool>::value, "NM_ARENA: bool");
+static_assert(std::is_trivially_default_constructible<float>::value, "NM_ARENA: float");
+static_assert(std::is_trivially_default_constructible<int>::value, "NM_ARENA: int");
+static_assert(std::is_trivially_default_constructible<int16_t*>::value, "NM_ARENA: int16_t*");
+static_assert(std::is_trivially_default_constructible<int32_t>::value, "NM_ARENA: int32_t");
+static constexpr size_t OVL_END = nmAlignTo(nmOv55, 16);
+static_assert(OVL_END <= NM_ARENA_SIZE, "NM_ARENA_SIZE (nm_common.h) を大きくしてください");
+extern const size_t OVL_SIZE = OVL_END;   // 起動時の確認用
+}  // namespace NullLife_Nuru

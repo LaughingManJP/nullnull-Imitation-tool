@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NullGif</title>
+<style>
+:root { --bg:#0b0d12; --panel:#13161e; --line:#262b37; --fg:#e6e8ee; --muted:#8a91a3; --accent:#7fd4c1; --ink:#062019; --bad:#f07a6a;
+  --body:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif; --mono:ui-monospace,Menlo,monospace; color-scheme:dark; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 var(--body); }
+.wrap { max-width:640px; margin:0 auto; padding:18px 16px 40px; display:flex; flex-direction:column; gap:14px; }
+h1 { font-size:20px; margin:0; } .sub { color:var(--muted); font-size:12.5px; }
+.box { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+h2 { font-size:11px; letter-spacing:.12em; color:var(--muted); margin:0; }
+.bar { height:8px; border-radius:5px; background:#0a0c10; border:1px solid var(--line); overflow:hidden; }
+.bar>i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+.num { font:12.5px var(--mono); color:var(--muted); } .num b { color:var(--fg); }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.btn { appearance:none; background:#1c2029; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:9px 14px; font:600 14px var(--body); }
+.btn.primary { background:var(--accent); color:var(--ink); border-color:var(--accent); }
+.btn.small { padding:4px 10px; font-size:12.5px; font-weight:500; }
+button:focus-visible, label:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+.jobs { display:flex; flex-direction:column; gap:6px; }
+.job { display:flex; flex-direction:column; gap:3px; font-size:12.5px; }
+.job .bar { height:5px; } .job.ok { color:var(--accent); } .job.err { color:var(--bad); }
+ul { list-style:none; margin:0; padding:0; }
+li { display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid var(--line); min-width:0; }
+li:first-child { border-top:0; }
+.fn { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:13px var(--mono); }
+.fs { color:var(--muted); font:12px var(--mono); flex:none; }
+.note { color:var(--muted); font-size:12px; margin:0; } .err { color:var(--bad); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div><h1>NullGif</h1><div class="sub">本体の Wi-Fi で GIF を送る(3分さわらないと、本体の Wi-Fi は自動で切れます)</div></div>
+  <p class="note err" id="msg" hidden></p>
+  <section class="box">
+    <h2>容量</h2>
+    <div class="bar"><i id="capBar"></i></div><div class="num" id="capText">—</div>
+    <p class="note">GIF は 64 個まで入ります。ただし容量(約 9.7MB)は写真と分け合うので、大きな GIF が多いときや、写真が多いときは、それより少なくなります。</p>
+  </section>
+  <section class="box">
+    <h2>GIF を送る</h2>
+    <div class="row"><label class="btn primary" for="pick">GIF を選ぶ</label><input type="file" id="pick" accept="image/gif,.gif" multiple hidden></div>
+    <div class="jobs" id="jobs"></div>
+    <p class="note">同じ名前の GIF は上書きします。466×466 くらいの GIF がきれいで速く動きます。</p>
+  </section>
+  <section class="box">
+    <h2>本体の GIF</h2>
+    <ul id="files"></ul>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const ERR = { FULL:'容量が足りません', NAME:'この名前は使えません', MANY:'GIF が多すぎます(64 個まで)', NOFS:'本体に GIF の置き場がありません',
+  OPEN:'本体に書き込めませんでした', SAVE:'本体に書き込めませんでした', NOFILE:'その GIF は本体にありません', BUSY:'本体が USB で受け取り中です' };
+const mb = (n) => (n / 1048576).toFixed(1) + 'MB', kb = (n) => n >= 1048576 ? mb(n) : Math.max(1, Math.round(n / 1024)) + 'KB';
+let info = null;
+function showErr(t) { $('msg').hidden = !t; $('msg').textContent = t || ''; }
+async function api(path) {
+  const r = await fetch(path, { cache: 'no-store' });
+  const j = await r.json().catch(() => ({ err: 'HTTP ' + r.status }));
+  if (!r.ok || j.err) throw new Error(ERR[j.err] || ('本体のエラー: ' + (j.err || r.status)));
+  return j;
+}
+function up(name, bytes, onp) {
+  return new Promise((ok, ng) => {
+    const x = new XMLHttpRequest(); x.open('POST', '/api/up'); x.setRequestHeader('X-Name', name); x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.onprogress = (e) => { if (e.lengthComputable && onp) onp(e.loaded / e.total); };
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch (e) { j = { err: 'HTTP ' + x.status }; } if (x.status !== 200 || j.err) ng(new Error(ERR[j.err] || ('本体のエラー: ' + (j.err || x.status)))); else ok(j); };
+    x.onerror = () => ng(new Error('本体につながりません(本体の Wi-Fi が切れたかもしれません)'));
+    x.send(bytes);
+  });
+}
+function safeName(name) {
+  let b = String(name).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^[._~]+/, '');
+  if ((b.match(/[A-Za-z0-9]/g) || []).length < 2) { const d = new Date(), p = (n) => String(n).padStart(2, '0');
+    b = `gif_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`; }
+  return b.slice(0, 36) + '.gif';
+}
+async function refresh() {
+  info = await api('/api/info');
+  $('capBar').style.width = (info.total ? Math.min(100, info.used / info.total * 100) : 0).toFixed(1) + '%';
+  $('capText').innerHTML = `残り <b>${mb(Math.max(0, info.total - info.used))}</b> / 全体 ${mb(info.total)}(GIF ${info.count} 個)`;
+  const list = await api('/api/list'), ul = $('files'); ul.textContent = '';
+  if (!list.files.length) { const li = document.createElement('li'); li.className = 'note'; li.textContent = 'まだ GIF がありません'; ul.append(li); }
+  for (const f of list.files) {
+    const li = document.createElement('li');
+    const n = document.createElement('span'); n.className = 'fn'; n.textContent = f.n;
+    const s = document.createElement('span'); s.className = 'fs'; s.textContent = kb(f.s);
+    const p = document.createElement('button'); p.className = 'btn small'; p.textContent = '流す';
+    p.onclick = async () => { try { await api('/api/play?n=' + encodeURIComponent(f.n)); } catch (e) { showErr(e.message); } };
+    const d = document.createElement('button'); d.className = 'btn small'; d.textContent = '消す';
+    d.onclick = async () => { if (!confirm(`「${f.n}」を本体から消しますか?`)) return; try { await api('/api/del?n=' + encodeURIComponent(f.n)); await refresh(); } catch (e) { showErr(e.message); } };
+    li.append(n, s, p, d); ul.append(li);
+  }
+}
+$('pick').onchange = async () => {
+  const files = [...$('pick').files]; $('pick').value = '';
+  for (const f of files) {
+    const job = document.createElement('div'); job.className = 'job';
+    const t = document.createElement('div'); const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.append(fill);
+    job.append(t, bar); $('jobs').prepend(job);
+    const name = safeName(f.name); t.textContent = name + '  準備中…';
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const sig = String.fromCharCode(...bytes.subarray(0, 6));
+      if (sig !== 'GIF87a' && sig !== 'GIF89a') throw new Error('GIF ではありません');
+      const j = await api('/api/info');
+      if (bytes.length + 32768 > j.total - j.used) throw new Error(`容量が足りません(${kb(bytes.length)})`);
+      await up(name, bytes, (k) => { fill.style.width = (k * 100).toFixed(0) + '%'; t.textContent = `${name}  ${Math.round(k * 100)}%`; });
+      fill.style.width = '100%'; t.textContent = `${name}  送りました(${kb(bytes.length)})`; job.classList.add('ok');
+    } catch (e) { t.textContent = `${name}  ${e.message}`; job.classList.add('err'); }
+  }
+  refresh().catch((e) => showErr(e.message));
+};
+refresh().catch((e) => showErr(e.message));
+</script>
+</body>
+</html>
