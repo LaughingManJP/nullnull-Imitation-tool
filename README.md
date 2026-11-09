@@ -21,7 +21,7 @@
 
 **https://laughingmanjp.github.io/nullnull-Imitation-tool/**
 
-本体がなくても、29作品ぜんぶをメニューから選んで動かせます(NullGif の GIF や NullSlide の写真も、エミュレータの中へ入れて試せます)。
+本体がなくても、28作品ぜんぶをメニューから選んで動かせます(NullGif の GIF や NullSlide の写真も、エミュレータの中へ入れて試せます)。
 本体に書き込むのと同じ C++ を WebAssembly にしたもので、画面・ボタンA/B・タッチ・傾き(パッド、またはスマホの傾きセンサー)・マイク(NullGoodbye)が使えます。
 StopWatch(丸い画面)と CoreS3(四角い画面)を切り替えられます。速さは本体とは違います。
 
