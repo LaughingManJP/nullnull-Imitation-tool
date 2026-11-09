@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NullSlide</title>
+<style>
+:root { --bg:#0d0b10; --panel:#17131b; --line:#2c2532; --fg:#eee8ee; --muted:#998fa0; --accent:#ff9ec4; --ink:#2a0f1b; --bad:#f07a6a;
+  --body:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif; --mono:ui-monospace,Menlo,monospace; color-scheme:dark; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 var(--body); }
+.wrap { max-width:640px; margin:0 auto; padding:18px 16px 40px; display:flex; flex-direction:column; gap:14px; }
+h1 { font-size:20px; margin:0; } .sub { color:var(--muted); font-size:12.5px; }
+.box { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+h2 { font-size:11px; letter-spacing:.12em; color:var(--muted); margin:0; }
+.bar { height:8px; border-radius:5px; background:#0b090d; border:1px solid var(--line); overflow:hidden; }
+.bar>i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+.num { font:12.5px var(--mono); color:var(--muted); } .num b { color:var(--fg); }
+.set { display:grid; grid-template-columns:max-content 1fr; gap:8px 12px; align-items:center; }
+.set .l { color:var(--muted); font-size:13px; }
+.seg { justify-self:start; max-width:100%; display:inline-flex; flex-wrap:wrap; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+.seg button { appearance:none; border:0; border-left:1px solid var(--line); background:transparent; color:var(--fg); font:500 13px var(--body); padding:7px 11px; }
+.seg button:first-child { border-left:0; }
+.seg button[aria-pressed="true"] { background:var(--accent); color:var(--ink); font-weight:700; }
+@media (max-width:480px) { .set { grid-template-columns:1fr; gap:3px; } .set .l { margin-top:6px; } }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.btn { appearance:none; background:#211b26; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:9px 14px; font:600 14px var(--body); }
+.btn.primary { background:var(--accent); color:var(--ink); border-color:var(--accent); }
+.btn.small { padding:4px 10px; font-size:12.5px; font-weight:500; } .btn.danger { color:var(--bad); }
+.btn:disabled { opacity:.45; }
+button:focus-visible, label:focus-within { outline:2px solid var(--accent); outline-offset:2px; }
+.fit { display:flex; gap:8px; flex-wrap:wrap; }
+.fit label { display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:7px 11px; }
+.fit label:has(input:checked) { border-color:var(--accent); background:rgba(255,158,196,.08); }
+.jobs { display:flex; flex-direction:column; gap:6px; }
+.job { display:flex; gap:10px; align-items:center; font-size:12.5px; }
+.job img { width:36px; height:36px; border-radius:50%; object-fit:cover; background:#000; flex:none; }
+.job .b { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.job .t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; } .job .bar { height:5px; }
+.job.ok { color:var(--accent); } .job.err { color:var(--bad); }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(92px,1fr)); gap:8px; }
+.ph { position:relative; aspect-ratio:1; border-radius:50%; overflow:hidden; background:#000; border:1px solid var(--line); }
+.ph img { width:100%; height:100%; object-fit:cover; display:block; }
+.ph button { position:absolute; appearance:none; border:0; font:600 11px var(--body); border-radius:12px; padding:3px 8px; }
+.ph .show { left:50%; bottom:8px; transform:translateX(-50%); background:rgba(0,0,0,.65); color:#fff; }
+.ph .del { right:6px; top:6px; background:rgba(0,0,0,.65); color:var(--bad); }
+.note { color:var(--muted); font-size:12px; margin:0; } .err { color:var(--bad); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div><h1>NullSlide</h1><div class="sub">本体の Wi-Fi で写真を送る(3分さわらないと、本体の Wi-Fi は自動で切れます)</div></div>
+  <p class="note err" id="msg" hidden></p>
+  <section class="box">
+    <h2>容量</h2>
+    <div class="bar"><i id="capBar"></i></div><div class="num" id="capText">—</div>
+    <p class="note">写真は 400 枚まで入ります。ただし容量(約 9.7MB)は GIF と分け合うので、GIF が多いときや、写真が大きいときは、それより少なくなります。</p>
+  </section>
+  <section class="box">
+    <h2>写真を送る</h2>
+    <div class="fit">
+      <label><input type="radio" name="fit" value="cover" checked>画面いっぱい(はみ出しは切る)</label>
+      <label><input type="radio" name="fit" value="contain">全体を入れる</label>
+    </div>
+    <div class="row"><label class="btn primary" for="pick">写真を選ぶ</label><input type="file" id="pick" accept="image/*" multiple hidden></div>
+    <div class="jobs" id="jobs"></div>
+  </section>
+  <section class="box">
+    <h2>スライドショーの設定</h2>
+    <div class="set" id="set"></div>
+  </section>
+  <section class="box">
+    <h2>本体の写真</h2>
+    <div class="grid" id="grid"></div>
+    <div class="row"><button class="btn small danger" id="clear">全部消す</button></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const ERR = { FULL:'容量が足りません', NAME:'この名前は使えません', MANY:'写真が多すぎます(400 枚まで)', BIG:'写真が大きすぎます',
+  NOFS:'本体に写真の置き場がありません', OPEN:'本体に書き込めませんでした', SAVE:'本体に書き込めませんでした', NOFILE:'その写真は本体にありません', ARG:'値がおかしいです', BUSY:'本体が USB で受け取り中です' };
+const SETS = [['切り替え方',['パッと','フェード','スライド','ハート']],['1枚の時間',['3秒','5秒','10秒','15秒','30秒','45秒','1分','手動']],['順番',['送った順','ランダム']],['形',['そのまま','ハート']],['明るさ',['1','2','3','4']]];
+const mb = (n) => (n / 1048576).toFixed(1) + 'MB', kb = (n) => n >= 1048576 ? mb(n) : Math.max(1, Math.round(n / 1024)) + 'KB';
+let info = null, segs = [];
+function showErr(t) { $('msg').hidden = !t; $('msg').textContent = t || ''; }
+async function api(path) {
+  const r = await fetch(path, { cache: 'no-store' });
+  const j = await r.json().catch(() => ({ err: 'HTTP ' + r.status }));
+  if (!r.ok || j.err) throw new Error(ERR[j.err] || ('本体のエラー: ' + (j.err || r.status)));
+  return j;
+}
+function up(name, bytes, onp) {
+  return new Promise((ok, ng) => {
+    const x = new XMLHttpRequest(); x.open('POST', '/api/up'); x.setRequestHeader('X-Name', name); x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.onprogress = (e) => { if (e.lengthComputable && onp) onp(e.loaded / e.total); };
+    x.onload = () => { let j = {}; try { j = JSON.parse(x.responseText); } catch (e) { j = { err: 'HTTP ' + x.status }; } if (x.status !== 200 || j.err) ng(new Error(ERR[j.err] || ('本体のエラー: ' + (j.err || x.status)))); else ok(j); };
+    x.onerror = () => ng(new Error('本体につながりません(本体の Wi-Fi が切れたかもしれません)'));
+    x.send(bytes);
+  });
+}
+function showInfo(j) {
+  info = j;
+  $('capBar').style.width = (j.total ? Math.min(100, j.used / j.total * 100) : 0).toFixed(1) + '%';
+  $('capText').innerHTML = `残り <b>${mb(Math.max(0, j.total - j.used))}</b> / 全体 ${mb(j.total)}(写真 ${j.count} 枚)`;
+  segs.forEach((bs, k) => bs.forEach((b, i) => b.setAttribute('aria-pressed', j.cfg[k] === i ? 'true' : 'false')));
+}
+SETS.forEach(([lab, names], k) => {
+  const l = document.createElement('div'); l.className = 'l'; l.textContent = lab;
+  const g = document.createElement('div'); g.className = 'seg'; g.setAttribute('role', 'group'); g.setAttribute('aria-label', lab);
+  segs[k] = names.map((n, i) => { const b = document.createElement('button'); b.textContent = n; b.setAttribute('aria-pressed', 'false');
+    b.onclick = async () => { if (!info) return; const c = info.cfg.slice(); c[k] = i; try { showInfo(await api('/api/set?c=' + c.join(','))); showErr(''); } catch (e) { showErr(e.message); } };
+    g.append(b); return b; });
+  $('set').append(l, g);
+});
+async function refresh() {
+  showInfo(await api('/api/info'));
+  const list = await api('/api/list');
+  const g = $('grid'); g.textContent = '';
+  if (!list.files.length) { const p = document.createElement('p'); p.className = 'note'; p.textContent = 'まだ写真がありません'; g.append(p); }
+  for (const f of list.files) {
+    const d = document.createElement('div'); d.className = 'ph';
+    const im = document.createElement('img'); im.loading = 'lazy'; im.alt = f.n; im.src = '/f/' + encodeURIComponent(f.n);
+    const s = document.createElement('button'); s.className = 'show'; s.textContent = '見せる';
+    s.onclick = async () => { try { await api('/api/show?n=' + encodeURIComponent(f.n)); } catch (e) { showErr(e.message); } };
+    const x = document.createElement('button'); x.className = 'del'; x.textContent = '消す'; x.setAttribute('aria-label', f.n + ' を消す');
+    x.onclick = async () => { if (!confirm('この写真を本体から消しますか?')) return; try { await api('/api/del?n=' + encodeURIComponent(f.n)); await refresh(); } catch (e) { showErr(e.message); } };
+    d.append(im, s, x); g.append(d);
+  }
+}
+$('clear').onclick = async () => { if (!info || !info.count || !confirm(`本体の写真 ${info.count} 枚を、全部消しますか?`)) return; try { await api('/api/clear'); await refresh(); } catch (e) { showErr(e.message); } };
+async function makeJpeg(file, size, fit, round) {
+  let bmp; try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (e) { bmp = await createImageBitmap(file).catch(() => null); }
+  if (!bmp) throw new Error('この画像は読めません');
+  const w = bmp.width, h = bmp.height, c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, size, size); g.imageSmoothingQuality = 'high';
+  const k = fit === 'contain' ? (round ? size / Math.hypot(w, h) : Math.min(size / w, size / h)) : Math.max(size / w, size / h);
+  g.drawImage(bmp, (size - w * k) / 2, (size - h * k) / 2, w * k, h * k);
+  const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.86));
+  const t = document.createElement('canvas'); t.width = t.height = 72; t.getContext('2d').drawImage(c, 0, 0, 72, 72);
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.7) };
+}
+function safeName(name, seq) {
+  let b = String(name).replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9._-]/g, '_').replace(/_+/g, '_').replace(/^[._~]+/, '').replace(/_+$/, '');
+  if ((b.match(/[A-Za-z0-9]/g) || []).length < 2) b = 'photo';
+  return String(seq % 10000).padStart(4, '0') + '_' + b.slice(0, 31) + '.jpg';
+}
+$('pick').onchange = async () => {
+  const files = [...$('pick').files]; $('pick').value = '';
+  const fit = document.querySelector('input[name="fit"]:checked').value;
+  for (const f of files) {
+    const job = document.createElement('div'); job.className = 'job';
+    const im = document.createElement('img'); im.alt = '';
+    const b = document.createElement('div'); b.className = 'b';
+    const t = document.createElement('div'); t.className = 't'; t.textContent = f.name + '  準備中…';
+    const bar = document.createElement('div'); bar.className = 'bar'; const fill = document.createElement('i'); bar.append(fill);
+    b.append(t, bar); job.append(im, b); $('jobs').prepend(job);
+    try {
+      const j = await api('/api/info');
+      const { bytes, thumb } = await makeJpeg(f, j.size, fit, j.round);
+      im.src = thumb;
+      if (bytes.length + 32768 > j.total - j.used) throw new Error('容量が足りません');
+      const name = safeName(f.name, j.seq);
+      await up(name, bytes, (k) => { fill.style.width = (k * 100).toFixed(0) + '%'; t.textContent = `${f.name}  ${Math.round(k * 100)}%`; });
+      fill.style.width = '100%'; t.textContent = `${f.name}  送りました(${kb(bytes.length)})`; job.classList.add('ok');
+    } catch (e) { t.textContent = `${f.name}  ${e.message}`; job.classList.add('err'); }
+  }
+  refresh().catch((e) => showErr(e.message));
+};
+refresh().catch((e) => showErr(e.message));
+</script>
+</body>
+</html>
