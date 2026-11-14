@@ -19,25 +19,9 @@
 
 ### ▶ ブラウザで試す
 
-**https://ユーザー名.github.io/unofficial-null2-m5stack/**
-(リポジトリを公開して GitHub Pages を有効にすると、この URL で開けます。`ユーザー名` は GitHub のアカウント名に置き換えてください)
+**https://LaughingManJP.github.io/unofficial-null2-m5stack/**
 
-本体がなくても、28作品ぜんぶをメニューから選んで動かせます(NullGif の GIF や NullSlide の写真も、エミュレータの中へ入れて試せます)。
-本体に書き込むのと同じ C++ を WebAssembly にしたもので、画面・ボタンA/B・タッチ・傾き(パッド、またはスマホの傾きセンサー)・マイク(NullGoodbye)が使えます。
-StopWatch(丸い画面)と CoreS3(四角い画面)を切り替えられます。速さは本体とは違います。
 
-GIF や写真は、PC からは本体を **USB メモリ** にして入れます(NullGif / NullSlide の設定の「USB メモリになる」)。スマホからは本体の Wi-Fi で送れます。
-
-**URL をクリックしたらすぐエミュレータが開くようにする手順**(最初に1回だけ)
-
-1. リポジトリを **Public**(公開)にする(無料のアカウントでは、公開しているリポジトリでないと GitHub Pages が使えません)
-2. リポジトリの **Settings → Pages** で、Source を「Deploy from a branch」、Branch を `main`、フォルダを `/docs` にして **Save**
-3. 数分待つと、上の URL でエミュレータが開けるようになります(Settings → Pages の上に、公開された URL が出ます)
-4. リポジトリのトップページの右側にある **About の歯車** を押して、**Website** に上の URL を入れて Save。
-   リポジトリのページの右上に URL が出るので、そこをクリックするだけでエミュレータが開きます
-5. この README の `ユーザー名` の所を、自分の GitHub のアカウント名に書き換える
-
-ページの作り直しかたは [tools/web-emulator](tools/web-emulator/) にあります。
 
 ---
 
